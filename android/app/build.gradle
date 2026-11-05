@@ -60,8 +60,7 @@ chaquopy {
             install "protobuf"
             install "pytz"
             install "websockets"
-            // yfinance sem o curl_cffi (não existe para Android): a rede passa pelo Android (investe_android.py)
-            install "--no-deps", "yfinance"
+            // o yfinance entra como código-fonte (sem o curl_cffi, que não existe para Android); veja publicar.yml
         }
     }
 }

@@ -9,3 +9,4 @@ android/.gradle/
 android/app/build/
 android/build/
 *.keystore
+android/app/src/main/python/yfinance/

@@ -112,6 +112,9 @@ jobs:
         run: |
           python ferramentas/preparar.py
           cp build/investe_ai.py android/app/src/main/python/investe_ai.py
+          # yfinance sem dependências (o curl_cffi não existe para Android): o código vai junto com o app
+          pip download yfinance --no-deps --only-binary=:all: -d "$RUNNER_TEMP/yf"
+          python -c "import zipfile,glob,sys;w=glob.glob(sys.argv[1]+'/yfinance-*.whl')[0];z=zipfile.ZipFile(w);[z.extract(n,'android/app/src/main/python') for n in z.namelist() if n.startswith('yfinance/')];print('yfinance:',w)" "$RUNNER_TEMP/yf"
           V="${VERSAO#v}"; V="${V#V}"; [ -z "$V" ] && V="0.0.${{ github.run_number }}"
           IFS=. read -r A B C <<< "$V"
           echo "VNOME=$V" >> $GITHUB_ENV
