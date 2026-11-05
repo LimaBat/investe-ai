@@ -119,7 +119,7 @@ jobs:
       - name: Conferir o Android SDK
         run: echo "ANDROID_HOME=$ANDROID_HOME"; ls "$ANDROID_HOME" | head; yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Gerar APK de teste (emulador)
-        run: gradle -p android assembleDebug -Pabis=x86_64 -PversaoNome=$VNOME -PversaoCodigo=$VCOD --stacktrace
+        run: bash ferramentas/gradle_com_log.sh -p android assembleDebug -Pabis=x86_64 -PversaoNome=$VNOME -PversaoCodigo=$VCOD --stacktrace
       - name: Ligar a aceleração do emulador
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -140,7 +140,7 @@ jobs:
           ANDROID_KEYSTORE_SENHA: ${{ secrets.ANDROID_KEYSTORE_SENHA }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/investe.keystore"; export ANDROID_KEYSTORE="$RUNNER_TEMP/investe.keystore"; else echo "AVISO: sem a chave de assinatura; o APK sai com assinatura de teste"; fi
-          gradle -p android assembleRelease -Pabis=arm64-v8a -PversaoNome=$VNOME -PversaoCodigo=$VCOD
+          bash ferramentas/gradle_com_log.sh -p android assembleRelease -Pabis=arm64-v8a -PversaoNome=$VNOME -PversaoCodigo=$VCOD
           cp android/app/build/outputs/apk/release/app-release.apk Investe.AI.apk
           ls -la Investe.AI.apk
       - uses: actions/upload-artifact@v4
