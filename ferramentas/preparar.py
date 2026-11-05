@@ -4,6 +4,7 @@ Variáveis de ambiente (todas opcionais):
   VERSAO          ex.: 3.2 ou v3.2 (padrão: a que está no código)
   IA_PROXY_URL    endereço do intermediário de IA (proxy-ia). Quando preenchido, as chaves embutidas são REMOVIDAS.
   IA_PROXY_TOKEN  senha simples que o intermediário confere (a mesma do segredo APP_TOKEN do Cloudflare)
+  GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET  cliente OAuth "App para computador" (login com Google e backup no Drive)
   IA_CHAVE_GROQ / IA_CHAVE_GEMINI  só para uso pessoal sem intermediário: embute as chaves no arquivo
   ATUALIZA_REPO   "usuario/repositorio" do GitHub para a atualização automática
 """
@@ -37,6 +38,12 @@ else:
     if os.environ.get("IA_CHAVE_GEMINI"): src = troca_const(src, "IA_CHAVE_PADRAO", os.environ["IA_CHAVE_GEMINI"].strip())
     if not (os.environ.get("IA_CHAVE_GROQ") or os.environ.get("IA_CHAVE_GEMINI")):
         print("AVISO: sem IA_PROXY_URL e sem chaves: a IA só funciona se a pessoa colocar a própria chave em Conta.")
+
+gid, gsec = (os.environ.get("GOOGLE_CLIENT_ID") or "").strip(), (os.environ.get("GOOGLE_CLIENT_SECRET") or "").strip()
+if gid and gsec:
+    src = troca_const(src, "G_CLIENT_ID", gid)
+    src = troca_const(src, "G_CLIENT_SECRET", gsec)
+    print("Login com Google: cliente OAuth embutido.")
 
 os.makedirs(os.path.join(RAIZ, "build"), exist_ok=True)
 with open(os.path.join(RAIZ, "build", "investe_ai.py"), "w", encoding="utf-8", newline="\n") as f:

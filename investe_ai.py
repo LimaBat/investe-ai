@@ -76,6 +76,10 @@ import re, json, math, time, socket, threading, webbrowser, traceback, shutil, g
 VERSAO = "3.1"
 # repositório do GitHub com as versões publicadas ("usuario/repositorio"); vazio = sem atualização automática
 ATUALIZA_REPO = ""
+# cliente OAuth do Google (tipo "App para computador") de quem publica o programa: login com Google e backup no Drive
+# para todo mundo sem configurar nada. Preenchidos na publicação (segredos GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).
+G_CLIENT_ID = ""
+G_CLIENT_SECRET = ""
 try:  # identifica esta versão do arquivo: abrir um arquivo mais novo fecha o programa antigo que estiver aberto
     import hashlib
     with open(ARQ_PROG, "rb") as _f:
@@ -1670,7 +1674,7 @@ def _hash_senha(senha, salt=None):
 
 def conta_estado():
     u = usuario_atual()
-    g = cfg()["google"]
+    g = _gcfg()
     out = {"logado": bool(u), "google_configurado": bool(g.get("client_id") and g.get("client_secret")),
            "ia_configurada": bool(_ia_efetiva()[1])}
     if u:
@@ -1775,6 +1779,12 @@ G_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 G_TOKEN = "https://oauth2.googleapis.com/token"
 G_ESCOPO = "openid email profile https://www.googleapis.com/auth/drive.appdata"
 DRIVE_ARQ = "investidor_dados.json"
+
+
+def _gcfg():
+    g = cfg()["google"]
+    if g.get("client_id") and g.get("client_secret"): return g
+    return {"client_id": G_CLIENT_ID, "client_secret": G_CLIENT_SECRET} if G_CLIENT_ID and G_CLIENT_SECRET else g
 _oauth = {}
 
 def api_google_config_ler():
@@ -1792,7 +1802,7 @@ def api_google_config(d):
     return conta_estado()
 
 def g_iniciar(porta):
-    g = cfg()["google"]
+    g = _gcfg()
     if not (g.get("client_id") and g.get("client_secret")):
         return {"erro": "Configure primeiro o ID e o segredo do cliente Google (veja o passo a passo na aba Conta)."}
     for k in [k for k, v in _oauth.items() if time.time() - v["t"] > 900]: _oauth.pop(k, None)
@@ -1819,7 +1829,7 @@ def g_callback(q):
     if q.get("error"):
         return _pag("Login cancelado ou recusado pelo Google.", False)
     try:
-        g = cfg()["google"]
+        g = _gcfg()
         r = requests.post(G_TOKEN, data={"code": q.get("code", ""), "client_id": g["client_id"], "client_secret": g["client_secret"],
                                          "redirect_uri": f"http://127.0.0.1:{st['porta']}/oauth/google/callback",
                                          "grant_type": "authorization_code", "code_verifier": st["v"]}, timeout=20)
@@ -1866,7 +1876,7 @@ def _g_token(u):
     g = u.get("google") or {}
     if g.get("access") and g.get("exp", 0) > time.time() + 60: return g["access"]
     if not g.get("refresh"): return None
-    c = cfg()["google"]
+    c = _gcfg()
     r = requests.post(G_TOKEN, data={"client_id": c.get("client_id"), "client_secret": c.get("client_secret"),
                                      "refresh_token": g["refresh"], "grant_type": "refresh_token"}, timeout=20).json()
     if "access_token" not in r: return None
