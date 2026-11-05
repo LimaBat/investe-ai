@@ -105,6 +105,21 @@ class SessaoAndroid(requests.Session):
         self.headers.update({"User-Agent": UA, "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"})
 
 
+GOOGLE = ("https://oauth2.googleapis.com/", "https://openidconnect.googleapis.com/", "https://www.googleapis.com/")
+
+
+def usar_rede_android_no_google():
+    """Login e backup do Google pela rede do Android (a mesma do Chrome), mais confiável que o TLS do Python."""
+    original = requests.Session.__init__
+
+    def init(self, *a, **k):
+        original(self, *a, **k)
+        ad = AdaptadorAndroid()
+        for prefixo in GOOGLE:
+            self.mount(prefixo, ad)
+    requests.Session.__init__ = init
+
+
 def preparar_yfinance(pasta):
     # o yfinance trata erros com nomes do curl_cffi (ex.: DNSError); com o requests eles não existem
     for nome, base in (("DNSError", requests.exceptions.ConnectionError), ("CertificateVerifyError", requests.exceptions.SSLError),
@@ -126,5 +141,6 @@ def iniciar(pasta):
     os.environ["INVESTEAI_ANDROID"] = "1"
     os.environ["YF_DISABLE_CURL_CFFI"] = "1"
     preparar_yfinance(pasta)
+    usar_rede_android_no_google()
     sys.argv = ["investe_ai.py", "--no-window"]
     runpy.run_module("investe_ai", run_name="__main__", alter_sys=True)  # fica no servidor até o app ser encerrado

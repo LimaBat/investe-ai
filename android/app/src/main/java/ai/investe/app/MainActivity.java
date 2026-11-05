@@ -4,7 +4,10 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.WindowInsets;
+import android.widget.FrameLayout;
 import android.os.SystemClock;
 import android.util.Base64;
 import android.util.Log;
@@ -25,6 +28,8 @@ public class MainActivity extends Activity {
     static volatile boolean pythonIniciado = false;
     static volatile String erroPython = null;
     WebView web;
+    String loginPendente = null;  // volta do login do Google (investeai://login?...)
+    volatile boolean servidorPronto = false;
 
     static final String CARREGANDO = "<html><body style='margin:0;background:#0b1020;color:#e8ecf6;font-family:sans-serif;"
             + "display:flex;align-items:center;justify-content:center;height:100vh;text-align:center'><div>"
@@ -51,7 +56,19 @@ public class MainActivity extends Activity {
                 return true;  // sites de fora (notícias, login do Google, downloads) abrem no navegador
             }
         });
-        setContentView(web);
+        // Android 15 desenha atrás do relógio e da barra de gestos: deixa o espaço deles livre
+        FrameLayout raiz = new FrameLayout(this);
+        raiz.setBackgroundColor(Color.parseColor("#0b1020"));
+        raiz.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        if (Build.VERSION.SDK_INT >= 30) {
+            raiz.setOnApplyWindowInsetsListener((v, ins) -> {
+                android.graphics.Insets b = ins.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+                v.setPadding(b.left, b.top, b.right, b.bottom);
+                return WindowInsets.CONSUMED;
+            });
+        }
+        setContentView(raiz);
+        loginPendente = consultaLogin(getIntent());
         mostrar(CARREGANDO);
         iniciarPython();
         new Thread(this::esperarServidor).start();
@@ -87,7 +104,12 @@ public class MainActivity extends Activity {
                 int cod = c.getResponseCode();
                 c.disconnect();
                 if (cod == 200) {
-                    runOnUiThread(() -> web.loadUrl(ENDERECO));
+                    servidorPronto = true;
+                    runOnUiThread(() -> {
+                        String q = loginPendente;
+                        loginPendente = null;
+                        web.loadUrl(q != null ? ENDERECO + "oauth/google/callback?" + q + "&fg=1" : ENDERECO);
+                    });
                     return;
                 }
             } catch (Exception ignorada) { }
@@ -100,10 +122,28 @@ public class MainActivity extends Activity {
                 + "<p style='color:#9aa6c0;font-size:12px'>" + android.text.Html.escapeHtml(msg) + "</p></body></html>"));
     }
 
+    static String consultaLogin(Intent i) {
+        if (i == null || i.getData() == null) return null;
+        Uri u = i.getData();
+        if (!"investeai".equals(u.getScheme()) || u.getEncodedQuery() == null) return null;
+        return u.getEncodedQuery();
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+        String q = consultaLogin(i);
+        if (q == null) return;
+        if (servidorPronto && pythonIniciado) web.loadUrl(ENDERECO + "oauth/google/callback?" + q + "&fg=1");
+        else loginPendente = q;  // conclui assim que o servidor responder
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         if (!pythonIniciado) {  // o sistema encerrou o Python em segundo plano: inicia de novo
+            servidorPronto = false;
             mostrar(CARREGANDO);
             erroPython = null;
             iniciarPython();

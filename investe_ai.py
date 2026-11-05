@@ -1825,6 +1825,15 @@ def _pag(msg, ok):
             f"<div style=\"font-size:48px;color:{cor}\">{'Pronto' if ok else 'Erro'}</div><p>{_html.escape(msg)}</p></div>")
 
 def g_callback(q):
+    if ANDROID and q.get("fg") != "1" and q.get("state") in _oauth:
+        _alvo = "intent://login?" + urlencode({k: q[k] for k in ("code", "state", "error", "scope") if q.get(k)}) + "#Intent;scheme=investeai;package=ai.investe.app;end"
+        _ah = _html.escape(_alvo, quote=True)
+        return ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Investe.AI</title>"
+                "<body style='font-family:system-ui;background:#0a0f1e;color:#e8ecf7;display:grid;place-items:center;height:100vh;margin:0'>"
+                "<div style='text-align:center;padding:24px'><p style='font-size:20px'>Quase lá</p><p>Toque no botão para concluir o login no app.</p>"
+                f"<a href='{_ah}' style='display:inline-block;margin-top:12px;padding:14px 26px;border-radius:12px;color:#06121a;font-weight:700;"
+                "text-decoration:none;background:linear-gradient(135deg,#5eead4,#8b5cf6)'>Voltar ao Investe.AI</a></div>"
+                f"<script>setTimeout(function(){{location.href={json.dumps(_alvo)}}},300)</script>")
     st = _oauth.pop(q.get("state", ""), None)
     if not st or time.time() - st["t"] > 900:
         return _pag("Sessão de login expirada. Volte ao Investe.AI e tente novamente.", False)
@@ -1861,10 +1870,11 @@ def g_callback(q):
             if j.get("refresh_token"): gu["refresh"] = j["refresh_token"]
             usuarios_salvar(U)
             c = cfg(); c["sessao"] = alvo["id"]; cfg_salvar(c)
+        if ANDROID: return _pag("Conta Google conectada!", True) + "<script>setTimeout(function(){location.href='/'},1200)</script>"
         return _pag("Conta Google conectada! Pode fechar esta aba e voltar ao Investe.AI.", True)
     except Exception:
         log("google callback:\n" + traceback.format_exc())
-        return _pag("Falha ao falar com o Google. Verifique sua conexão e tente de novo.", False)
+        return _pag("Falha ao falar com o Google. Verifique sua conexão e tente de novo. (" + type(sys.exc_info()[1]).__name__ + ")", False) + ("<p style='text-align:center'><a href='/' style='color:#5eead4'>Voltar</a></p>" if ANDROID else "")
 
 def api_google_desvincular():
     u = usuario_atual()
