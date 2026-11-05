@@ -93,6 +93,65 @@ jobs:
         with:
           tag_name: ${{ github.event.release.tag_name }}
           files: Investe.AI-mac.zip
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # a mesma versão do Python que vai dentro do app (Chaquopy)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Preparar o código
+        run: |
+          python ferramentas/preparar.py
+          cp build/investe_ai.py android/app/src/main/python/investe_ai.py
+          V="${VERSAO#v}"; V="${V#V}"; [ -z "$V" ] && V="0.0.${{ github.run_number }}"
+          IFS=. read -r A B C <<< "$V"
+          echo "VNOME=$V" >> $GITHUB_ENV
+          echo "VCOD=$(( ${A:-0}*10000 + ${B:-0}*100 + ${C:-0} ))" >> $GITHUB_ENV
+      - name: Gerar APK de teste (emulador)
+        run: gradle -p android assembleDebug -Pabis=x86_64 -PversaoNome=$VNOME -PversaoCodigo=$VCOD --stacktrace
+      - name: Ligar a aceleração do emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Testar no emulador (abre o app e busca cotações reais)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash ferramentas/testar_android.sh
+      - name: Gerar o APK final (celulares)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_SENHA: ${{ secrets.ANDROID_KEYSTORE_SENHA }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/investe.keystore"; export ANDROID_KEYSTORE="$RUNNER_TEMP/investe.keystore"; else echo "AVISO: sem a chave de assinatura; o APK sai com assinatura de teste"; fi
+          gradle -p android assembleRelease -Pabis=arm64-v8a -PversaoNome=$VNOME -PversaoCodigo=$VCOD
+          cp android/app/build/outputs/apk/release/app-release.apk Investe.AI.apk
+          ls -la Investe.AI.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: Investe.AI.apk
+      - name: Anexar o APK à release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: Investe.AI.apk
   publicar:
     if: github.event_name == 'release'
     needs: [windows]   # o Mac anexa o próprio arquivo quando ficar pronto (a fila de Mac do GitHub pode demorar)

@@ -1,0 +1,67 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+// versão e arquiteturas vêm da publicação (ex.: -PversaoNome=3.5 -PversaoCodigo=305 -Pabis=arm64-v8a)
+def versaoNome = (project.findProperty('versaoNome') ?: '1.0').toString()
+def versaoCodigo = (project.findProperty('versaoCodigo') ?: '1').toString().toInteger()
+def abis = (project.findProperty('abis') ?: 'arm64-v8a').toString().split(',')
+
+android {
+    namespace 'ai.investe.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ai.investe.app'
+        minSdk 24
+        targetSdk 35
+        versionCode versaoCodigo
+        versionName versaoNome
+        ndk { abiFilters(*abis) }
+    }
+
+    signingConfigs {
+        release {
+            if (System.getenv('ANDROID_KEYSTORE')) {
+                storeFile file(System.getenv('ANDROID_KEYSTORE'))
+                storePassword System.getenv('ANDROID_KEYSTORE_SENHA')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS') ?: 'investe-ai'
+                keyPassword System.getenv('ANDROID_KEYSTORE_SENHA')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig System.getenv('ANDROID_KEYSTORE') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packagingOptions {
+        jniLibs { useLegacyPackaging true }
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version "3.11"
+        pip {
+            // pacotes com código nativo vêm do repositório do Chaquopy
+            install "numpy"
+            install "pandas"
+            install "requests"
+            install "feedparser"
+            install "beautifulsoup4"
+            install "platformdirs"
+            install "protobuf"
+            install "pytz"
+            install "websockets"
+            // yfinance sem o curl_cffi (não existe para Android): a rede passa pelo Android (investe_android.py)
+            install "--no-deps", "yfinance"
+        }
+    }
+}

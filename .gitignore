@@ -4,3 +4,8 @@ dist/
 __pycache__/
 proxy-ia/.wrangler/
 proxy-ia/node_modules/
+android/app/src/main/python/investe_ai.py
+android/.gradle/
+android/app/build/
+android/build/
+*.keystore

@@ -6,6 +6,7 @@
 import os, sys, subprocess
 
 CONGELADO = bool(getattr(sys, "frozen", False))  # True no .exe / app gerado pelo PyInstaller
+ANDROID = bool(os.environ.get("INVESTEAI_ANDROID"))  # rodando dentro do app Android (Chaquopy)
 ARQ_PROG = os.path.abspath(sys.executable if CONGELADO else __file__)
 _AQUI = os.path.dirname(ARQ_PROG)
 
@@ -954,6 +955,7 @@ def _abrir_navegador(url):
     webbrowser.open(url)
 
 def _splash_guarda():
+    if ANDROID or "--no-window" in sys.argv: return
     # se a janela for fechada durante o carregamento, encerra o programa
     while SPLASH["url"] is None:
         time.sleep(2)
@@ -2740,6 +2742,7 @@ def _vt(v):
 
 
 def _nome_pacote():
+    if ANDROID: return "Investe.AI.apk"
     if CONGELADO: return "Investe.AI.exe" if os.name == "nt" else "Investe.AI-mac.zip"
     return "Investe.AI.bat"
 
@@ -2756,7 +2759,7 @@ def api_atualizacao(forcar=False):
         nova = bool(tag) and _vt(tag) > _vt(VERSAO)
         info = {"ativo": True, "atual": VERSAO, "versao": tag.lstrip("vV"), "disponivel": bool(nova and asset),
                 "notas": str(j.get("body") or "")[:1500], "url": asset.get("browser_download_url") if asset else None,
-                "pagina": j.get("html_url"), "automatica": os.name == "nt"}
+                "pagina": j.get("html_url"), "automatica": os.name == "nt" and not ANDROID}
     except Exception:
         log("atualizacao:\n" + traceback.format_exc())
         info = {"ativo": True, "atual": VERSAO, "disponivel": False, "erro": "Não consegui verificar agora."}
@@ -2767,10 +2770,11 @@ def api_atualizacao(forcar=False):
 def api_atualizar():
     info = api_atualizacao(True)
     if not info.get("disponivel"): return {"erro": "Nenhuma atualização disponível."}
-    if os.name != "nt":  # Mac: abre a página da versão nova para baixar
-        try: webbrowser.open(info.get("pagina") or info["url"])
-        except Exception: pass
-        return {"ok": True, "pagina": True}
+    if os.name != "nt" or ANDROID:  # Mac e Android: abre o download da versão nova
+        if not ANDROID:
+            try: webbrowser.open(info.get("pagina") or info["url"])
+            except Exception: pass
+        return {"ok": True, "pagina": True, "url": info.get("url") or info.get("pagina")}
     pasta = os.path.join(BASE, "app"); os.makedirs(pasta, exist_ok=True)
     destino = os.path.join(pasta, _nome_pacote()); tmp = destino + ".baixando"
     try:
@@ -3386,6 +3390,7 @@ def api_pasta():
 estado = {"ultimo_ping": time.time(), "visto": False, "bye": None}
 
 def watchdog():
+    if ANDROID: return
     while True:
         time.sleep(2)
         agora = time.time()
@@ -4196,6 +4201,7 @@ select.sel.moe-sel{padding:11px 14px;font-size:14.5px;width:100%}
 @media(max-width:900px){#ct-out .grid[style*="230px"]{grid-template-columns:1fr!important}#ct-out .grid[style*="230px"]>*{min-width:0}}
 @media(max-width:760px){#v-conta .tbl{display:block;overflow-x:auto}}
 .atu-b{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:1300;display:flex;align-items:center;gap:12px;max-width:min(720px,94vw);padding:12px 16px;border:1px solid var(--accent);border-radius:16px;background:var(--bg2);box-shadow:0 20px 50px rgba(0,0,0,.45)}.atu-b>div{flex:1;min-width:0}.atu-b .sub{display:block;font-size:12.5px}
+body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #dx-arq{display:none}
 
 </style>
 </head>
@@ -4418,7 +4424,7 @@ select.sel.moe-sel{padding:11px 14px;font-size:14.5px;width:100%}
   <div class="head"><h1>Minha <span class="grad">carteira</span></h1><div class="inv-bts"><button class="chip priv-bt" type="button"></button><button class="btn ghost sm" id="inv-imp" type="button" data-tip="Traga as negociações do site da B3 (Área do Investidor) ou de uma planilha.">Importar</button><button class="btn sm" id="inv-novo" type="button">+ Lançamento</button></div></div>
   <p class="sub">Registre compras, vendas e aplicações para acompanhar posição, resultado, proventos, rentabilidade contra o CDI e o imposto de renda, como no aplicativo da corretora. Tudo fica salvo neste computador.</p>
   <div id="inv-resumo" class="grid g4 mt"></div>
-  <div class="tb2" id="inv-tabs"><button class="chip on" data-k="pos" type="button" data-tip="Seus ativos, quanto valem hoje e o resultado de cada um.">Posição</button><button class="chip" data-k="graf" type="button" data-tip="Gráfico com a variação de todos os seus ativos no período.">Gráfico</button><button class="chip" data-k="lanc" type="button" data-tip="Histórico de compras e vendas. Edite, exclua, importe ou exporte.">Lançamentos</button><button class="chip" data-k="rf" type="button" data-tip="CDB, Tesouro, LCI/LCA e outros, com o valor atualizado pelo CDI, Selic ou IPCA.">Renda fixa</button><button class="chip" data-k="prov" type="button" data-tip="Dividendos e rendimentos recebidos e a projeção para os próximos 12 meses.">Proventos</button><button class="chip" data-k="rent" type="button" data-tip="Quanto sua carteira rendeu dia a dia comparada com CDI, Ibovespa e inflação.">Rentabilidade</button><button class="chip" data-k="ir" type="button" data-tip="Apuração mensal de imposto sobre vendas, DARF e lista para a declaração anual.">Imposto de renda</button><button class="chip" data-k="apps" type="button" data-tip="Descubra quais aplicativos e corretoras combinam com o seu perfil.">Qual app usar</button></div>
+  <div class="tb2" id="inv-tabs"><button class="chip on" data-k="pos" type="button" data-tip="Seus ativos, quanto valem hoje e o resultado de cada um.">Posição</button><button class="chip" data-k="graf" type="button" data-tip="Gráfico com a variação de todos os seus ativos no período.">Gráfico</button><button class="chip" data-k="lanc" type="button" data-tip="Histórico de compras e vendas. Edite, exclua, importe ou exporte.">Lançamentos</button><button class="chip" data-k="rf" type="button" data-tip="CDB, Tesouro, LCI/LCA e outros, com o valor atualizado pelo CDI, Selic ou IPCA.">Renda fixa</button><button class="chip" data-k="prov" type="button" data-tip="Dividendos e rendimentos recebidos e a projeção para os próximos 12 meses.">Proventos</button><button class="chip" data-k="rent" type="button" data-tip="Quanto sua carteira rendeu dia a dia comparada com CDI, Ibovespa e inflação.">Rentabilidade</button><button class="chip" data-k="ir" type="button" data-tip="Apuração mensal de imposto sobre vendas, DARF e lista para a declaração anual.">Imposto de renda</button><button class="chip" data-k="apps" type="button" data-tip="Quais aplicativos e corretoras reais combinam com você para investir de verdade.">Qual app usar</button></div>
   <div id="inv-pos"></div><div id="inv-graf" style="display:none"></div><div id="inv-lanc" style="display:none"></div><div id="inv-rf" style="display:none"></div><div id="inv-prov" style="display:none"></div><div id="inv-rent" style="display:none"></div><div id="inv-ir" style="display:none"></div><div id="inv-apps" style="display:none"></div>
 </section>
 
@@ -4610,7 +4616,7 @@ $('#f-news').onsubmit=e=>{e.preventDefault();noticias($('#q-news').value);};
 
 /* ---------- tooltips ---------- */
 const tipEl=document.createElement('div');tipEl.id='tip';document.body.appendChild(tipEl);
-const NAVTIP={mercado:'Mercado agora: índices, mapa de calor da bolsa, maiores altas e baixas, moedas, commodities e cripto.',invest:'Corretora simulada: invista com dinheiro fictício e preços reais (começa com R$ 1.000). Também dá para registrar sua carteira real.',alertas:'Avisos quando um ativo chegar ao preço que você quer.',home:'Visão geral: Selic, inflação, dólar e atalhos.',analisar:'Veja indicadores, gráfico, riscos e notícias de uma ação.',ranking:'Compare vários ativos lado a lado pela nota do modelo.',aprender:'Tipos de investimento e o que move o mercado.',noticias:'Notícias gerais do mercado e uma aba para cada ativo, com os temas que o influenciam.',simulador:'Juros compostos, metas, renda fixa, independência financeira e preço justo.',glossario:'Dicionário de termos, trilha de estudos e erros comuns.',carteira:'Monte uma carteira personalizada pelo seu perfil de risco e pelo valor que você tem.',comparar:'Compare o desempenho, o risco e a correlação de vários ativos no mesmo gráfico.',academia:'Aulas para iniciantes e experientes, quiz e checklist do investidor.'};
+const NAVTIP={mercado:'Mercado agora: índices, mapa de calor da bolsa, maiores altas e baixas, moedas, commodities e cripto.',invest:'Corretora simulada: invista com dinheiro fictício e preços reais (começa com R$ 1.000).',alertas:'Avisos quando um ativo chegar ao preço que você quer.',home:'Visão geral: Selic, inflação, dólar e atalhos.',analisar:'Veja indicadores, gráfico, riscos e notícias de uma ação.',ranking:'Compare vários ativos lado a lado pela nota do modelo.',aprender:'Tipos de investimento e o que move o mercado.',noticias:'Notícias gerais do mercado e uma aba para cada ativo, com os temas que o influenciam.',simulador:'Juros compostos, metas, renda fixa, independência financeira e preço justo.',glossario:'Dicionário de termos, trilha de estudos e erros comuns.',carteira:'Monte uma carteira personalizada pelo seu perfil de risco e pelo valor que você tem.',comparar:'Compare o desempenho, o risco e a correlação de vários ativos no mesmo gráfico.',academia:'Aulas para iniciantes e experientes, quiz e checklist do investidor.'};
 $$('nav button').forEach(b=>b.dataset.tip=NAVTIP[b.dataset.v]||'');
 const RULES=[['.gauge','Nota de 0 a 100 baseada em tendência, valuation, rentabilidade, risco e dividendos. Resumo educativo, não é previsão.'],['.rk','Clique para abrir a análise completa deste ativo.'],['#chips-analise .chip,#atalhos .chip','Clique para analisar este ativo.'],['#atalhos-rank .chip,#pills-rank .chip','Clique para comparar os ativos desta lista.'],['#chips-news .chip','Clique para buscar notícias sobre este tema.'],['.stat','Indicador do Banco Central que influencia o preço dos investimentos.'],['.news a','Abre a notícia em uma nova janela.'],['.legend','Linha sólida: preço. Tracejada: média dos últimos 50 dias (tendência).'],['#q-ticker','Digite o código da ação: PETR4, VALE3, AAPL…'],['#q-rank','Digite 2 ou mais códigos separados por espaço.'],['#q-news','Digite um tema ou nome de empresa.']];
 function tipText(el){const t=el.closest('[data-tip],[title]');if(t){if(t.title){t.dataset.tip=t.title;t.removeAttribute('title');}if(t.dataset.tip)return t.dataset.tip;}for(const [s,x] of RULES)if(el.closest(s))return x;return '';}
@@ -6190,7 +6196,7 @@ function usrBind(){
     try{USR=await apiPost(modo==='reg'?'/api/conta/registrar':'/api/conta/entrar',{nome:$('#usr-nome').value,email:$('#usr-email').value,senha:$('#usr-senha').value});sfx.play('ok');await usrPosLogin();toast('Bem-vindo, '+USR.usuario.nome);}
     catch(er){$('#usr-err').innerHTML=errBox(er.message);bt.disabled=false;}};
   const g=$('#usr-g');if(g)g.onclick=async()=>{g.disabled=true;
-    try{await apiPost('/api/google/iniciar');toast('Continue o login na janela do navegador.');
+    try{const _gr=await apiPost('/api/google/iniciar');if(EH_ANDROID&&_gr&&_gr.url)location.href=_gr.url;toast('Continue o login na janela do navegador.');
       const t0=Date.now(),jaTinha=!!(USR.logado&&USR.usuario&&USR.usuario.google);
       const iv=setInterval(async()=>{await usrCarrega();const tem=!!(USR.logado&&USR.usuario&&USR.usuario.google);
         if(tem&&!jaTinha){clearInterval(iv);await usrPosLogin();toast('Conta Google conectada!');}
@@ -6227,6 +6233,7 @@ usrCarrega();
    gráfico profissional, busca rápida e melhorias da IA)
    ===================================================================== */
 const PASTA_DADOS=(window.__DADOS__||{}).pasta||'';
+const EH_ANDROID=/InvesteAIAndroid/.test(navigator.userAgent);if(EH_ANDROID)document.body.classList.add('android');
 const hojeISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 const isoDe=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const dataBR=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}/${m[2]}/${m[1]}`:String(s||'');};
@@ -6684,7 +6691,7 @@ function appsRender(){
   // complementos: interesses que o 1º colocado não cobre bem
   const comp=p.int.filter(f=>(best.s[f]||0)<2).map(f=>{const e=R.filter(a=>a.k!==best.k&&(a.s[f]||0)===3).sort((x,y)=>y.nota-x.nota)[0];return e?[f,e]:null;}).filter(Boolean);
   const outros=R.slice(3).map(a=>`<tr><td><b>${esc(a.n)}</b><small>${esc(a.tp)}</small></td><td>${a.nota}</td><td class="sub">${a.falta.length?'não atende '+a.falta.map(f=>APPS_TX[f]).join(', '):a.mot.slice(0,3).map(f=>APPS_TX[f]).join(', ')}</td></tr>`).join('');
-  h.innerHTML=`<div class="card"><h2>Qual aplicativo combina com você?</h2><p class="sub">Responda (já preenchemos com base na sua carteira e no seu perfil da aba Montar carteira) e veja os aplicativos de investimento mais adequados.</p><div class="ap-qs">${q}</div><div style="margin-top:6px"><button type="button" class="chip" id="ap-reset">Recalcular pela minha carteira</button></div></div>
+  h.innerHTML=`<div class="card"><h2>Pronto para investir de verdade?</h2><p class="sub">Depois de praticar no simulador, veja quais aplicativos e corretoras reais combinam com você para fazer os mesmos investimentos com dinheiro de verdade. Já preenchemos as respostas com base no que você investe no simulador e no seu perfil da aba Montar carteira.</p><div class="ap-qs">${q}</div><div style="margin-top:6px"><button type="button" class="chip" id="ap-reset">Recalcular pela minha carteira</button></div></div>
    <h2 class="mt" style="margin-bottom:10px">Recomendados para você</h2><div class="grid g3 ap-g">${top.map(card).join('')}</div>
    ${comp.length?`<div class="card mt"><h2>Para completar</h2><p class="sub">O ${esc(best.n)} não cobre bem tudo o que você quer. Muitos investidores usam um segundo aplicativo para isso:</p><ul class="ap-ul">${comp.map(([f,e])=>`<li><b>${APPS_TX[f][0].toUpperCase()+APPS_TX[f].slice(1)}:</b> ${esc(e.n)}, ${esc(e.d.charAt(0).toLowerCase()+e.d.slice(1))}</li>`).join('')}</ul></div>`:''}
    <div class="grid g2 mt"><div class="card"><h2>Outras opções</h2><div class="tbl-wrap"><table class="tbl"><tr><th>Aplicativo</th><th>Nota</th><th>Observação</th></tr>${outros}</table></div></div>
@@ -6696,7 +6703,7 @@ function appsRender(){
   $('#ap-reset').onclick=()=>{try{localStorage.removeItem('apps_pref');}catch(e){}if(typeof agendaSync==='function')agendaSync();appsRender();toast('Respostas recalculadas pela sua carteira.');};}
 /* ---------- simulador: conta virtual com dinheiro fictício e preços reais ---------- */
 const SIM_INICIAL=1000;
-const simAtivo=()=>LS.g('inv_modo','sim')!=='real';
+const simAtivo=()=>true;  // o Investe.AI é só simulador (dinheiro fictício, preços reais)
 const K_L=()=>simAtivo()?'sim_lanc':'lanc',K_R=()=>simAtivo()?'sim_rf':'rf';
 const simMovs=()=>LS.g('sim_movs',[]).filter(m=>m&&m.id&&isFinite(m.v));
 function simGarante(){if(simAtivo()&&!LS.g('sim_movs',[]).length){LS.s('sim_movs',[{id:novoId(),tipo:'ini',v:SIM_INICIAL,t:Date.now()}]);if(typeof agendaSync==='function')agendaSync();}}
@@ -6714,9 +6721,7 @@ function simUI(){const s=simAtivo(),hd=$('#v-invest .head h1');
   $$('.sim-so').forEach(e=>e.style.display=s?'':'none');$$('.real-so').forEach(e=>e.style.display=s?'none':'');
   const t=$('#inv-tabs [data-k=lanc]');if(t){t.textContent=s?'Extrato':'Lançamentos';t.dataset.tip=s?'Todas as movimentações do simulador: depósitos, saques, compras, vendas, aplicações e proventos.':'Histórico de compras e vendas. Edite, exclua, importe ou exporte.';}const sel=$('#inv-modo');if(sel)sel.value=s?'sim':'real';
   const nb=$('nav button[data-v=invest]');if(nb)nb.classList.toggle('sim-on',s);}
-function simUIInit(){const ib=$('#v-invest .inv-bts');if(!ib||$('#inv-modo'))return;
-  ib.insertAdjacentHTML('afterbegin',`<select id="inv-modo" class="moe-sel moe-chip" aria-label="Modo" data-tip="Simulador: dinheiro fictício com preços reais. Carteira real: registre o que você investiu de verdade."><option value="sim">Simulador</option><option value="real">Carteira real</option></select>`);
-  $('#inv-modo').onchange=e=>simModo(e.target.value);
+function simUIInit(){const ib=$('#v-invest .inv-bts');if(!ib||$('#sim-neg'))return;
   $('#inv-imp').classList.add('real-so');$('#inv-novo').classList.add('real-so');
   ib.insertAdjacentHTML('beforeend',`<button class="btn ghost sm sim-so" type="button" id="sim-saq">Sacar</button><button class="btn ghost sm sim-so" type="button" id="sim-dep">Depositar</button><button class="btn sm sim-so" type="button" id="sim-neg">Comprar / vender</button>`);
   $('#sim-dep').onclick=()=>simMov('dep');$('#sim-saq').onclick=()=>simMov('saq');$('#sim-neg').onclick=()=>simNegociar();simUI();}
@@ -7233,7 +7238,7 @@ function atuBanner(j){if(!j||!j.disponivel||$('#atu-b'))return;if(LS.g('atu_igno
   document.body.insertAdjacentHTML('beforeend',`<div id="atu-b" class="atu-b"><div><b>Nova versão ${esc(j.versao)} do Investe.AI</b><span class="sub">Você está na ${esc(j.atual)}.${j.notas?' '+esc(j.notas.split('\n')[0].slice(0,140)):''}</span></div><button class="btn sm" type="button" id="atu-ok">${j.automatica?'Atualizar agora':'Baixar'}</button><button class="chip" type="button" id="atu-no">Depois</button></div>`);
   $('#atu-no').onclick=()=>{LS.s('atu_ignorar',j.versao);$('#atu-b').remove();};
   $('#atu-ok').onclick=async()=>{const b=$('#atu-ok');b.disabled=true;b.textContent='Baixando…';
-    try{const r=await apiPost('/api/atualizar',{});if(r.erro)throw new Error(r.erro);
+    try{const r=await apiPost('/api/atualizar',{});if(r.erro)throw new Error(r.erro);if(EH_ANDROID&&r.url){location.href=r.url;b.disabled=false;b.textContent='Baixar';return;}
       $('#atu-b').innerHTML=r.pagina?'<div><b>A página da versão nova foi aberta no navegador.</b><span class="sub">Baixe, abra e pode apagar a versão antiga.</span></div>':'<div><b>Atualização baixada.</b><span class="sub">A versão nova está abrindo em outra janela; esta pode ser fechada.</span></div>';}
     catch(e){toast(e.message);b.disabled=false;b.textContent='Tentar de novo';}};}
 setTimeout(()=>{api('/api/atualizacao').then(atuBanner).catch(()=>{});},8000);
