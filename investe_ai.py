@@ -1683,7 +1683,7 @@ def conta_estado():
         gu = u.get("google") or {}
         out["usuario"] = {"nome": u.get("nome"), "email": u.get("email"), "tem_senha": bool(u.get("hash")),
                           "google": bool(gu.get("sub")), "drive": bool(gu.get("drive") and gu.get("refresh")),
-                          "foto": gu.get("foto"), "ultimo_sync": gu.get("ultimo_sync"), "erro_sync": gu.get("erro_sync")}
+                          "foto": gu.get("foto"), "ultimo_sync": gu.get("ultimo_sync"), "erro_sync": gu.get("erro_sync"), "puxar": bool(gu.get("drive") and gu.get("puxado") is False)}
     return out
 
 def api_registrar(d):
@@ -1868,6 +1868,7 @@ def g_callback(q):
             gu.update({"sub": sub, "email": email, "foto": ui.get("picture"), "access": j["access_token"],
                        "exp": time.time() + int(j.get("expires_in", 3600)), "drive": "drive.appdata" in (j.get("scope") or "")})
             if j.get("refresh_token"): gu["refresh"] = j["refresh_token"]
+            gu["puxado"] = False  # até trazer os dados do Drive, este aparelho não envia nada
             usuarios_salvar(U)
             c = cfg(); c["sessao"] = alvo["id"]; cfg_salvar(c)
         if ANDROID: return _pag("Conta Google conectada!", True) + "<script>setTimeout(function(){location.href='/'},1200)</script>"
@@ -1913,6 +1914,7 @@ def _drive_achar(tok):
 def drive_push(uid):
     u = usuarios()["usuarios"].get(uid)
     if not (u and (u.get("google") or {}).get("drive")): return False
+    if u["google"].get("puxado") is False: return False  # ainda não trouxe os dados da nuvem neste aparelho
     tok = _g_token(u)
     if not tok: raise RuntimeError("Sem permissão do Google. Vincule a conta de novo.")
     corpo = json.dumps(dados_ler(uid), ensure_ascii=False).encode("utf-8")
@@ -1948,13 +1950,33 @@ def _drive_push_bg(uid):
     except Exception as e:
         log("drive push: " + str(e)); _marca_sync(uid, str(e)[:120])
 
+def _sync_migrar():
+    # contas Google vinculadas antes da 3.8: o computador reenvia os dados dele ao Drive; o celular traz da nuvem
+    try:
+        with _trava:
+            U = usuarios(); mudou = []
+            for x in U["usuarios"].values():
+                gu = x.get("google") or {}
+                if gu.get("drive") and "puxado" not in gu:
+                    gu["puxado"] = not ANDROID; mudou.append(x["id"])
+            if mudou: usuarios_salvar(U)
+        if not ANDROID:
+            for uid in mudou: _drive_agendar(uid)
+    except Exception:
+        log("sync migrar:\n" + traceback.format_exc())
+_sync_migrar()
+
 def api_sincronizar():
     u = usuario_atual()
     if not u: return {"erro": "Entre na sua conta."}
     local = dados_ler(u["id"]); aviso = None
     try:
         rem = drive_pull(u["id"])
-        if rem and rem.get("atualizado", 0) > local.get("atualizado", 0):
+        primeiro = (u.get("google") or {}).get("puxado") is False
+        if primeiro:
+            with _trava:
+                U = usuarios(); U["usuarios"][u["id"]]["google"]["puxado"] = True; usuarios_salvar(U)
+        if rem and rem.get("dados") and (primeiro or rem.get("atualizado", 0) > local.get("atualizado", 0)):
             with _trava: _gravar_json(_dados_path(u["id"]), {"atualizado": rem["atualizado"], "dados": {k: v for k, v in rem["dados"].items() if k in CHAVES_SYNC}})
             local = dados_ler(u["id"])
         elif local.get("dados"):
@@ -7252,6 +7274,8 @@ function atuBanner(j){if(!j||!j.disponivel||$('#atu-b'))return;if(LS.g('atu_igno
       $('#atu-b').innerHTML=r.pagina?'<div><b>A página da versão nova foi aberta no navegador.</b><span class="sub">Baixe, abra e pode apagar a versão antiga.</span></div>':'<div><b>Atualização baixada.</b><span class="sub">A versão nova está abrindo em outra janela; esta pode ser fechada.</span></div>';}
     catch(e){toast(e.message);b.disabled=false;b.textContent='Tentar de novo';}};}
 setTimeout(()=>{api('/api/atualizacao').then(atuBanner).catch(()=>{});},8000);
+/* conta Google recém-conectada neste aparelho (ex.: login pelo navegador do celular): traz os dados da nuvem */
+setTimeout(async()=>{try{if(!USR.usuario)await usrCarrega();if(USR.logado&&USR.usuario&&USR.usuario.puxar){await usrPosLogin();toast('Dados da sua conta Google carregados.');}}catch(e){}},600);
 
 </script>
 </body>
