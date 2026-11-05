@@ -63,6 +63,8 @@ jobs:
             build/Investe.AI.bat
   mac:
     runs-on: macos-latest
+    continue-on-error: true   # o app de Mac é opcional: não impede a publicação do Windows
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -79,7 +81,7 @@ jobs:
           name: mac
           path: Investe.AI-mac.zip
   publicar:
-    if: github.event_name == 'release'
+    if: ${{ always() && github.event_name == 'release' && needs.windows.result == 'success' }}
     needs: [windows, mac]
     runs-on: ubuntu-latest
     steps:
@@ -90,6 +92,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
+          fail_on_unmatched_files: false
           files: |
             arquivos/dist/Investe.AI.exe
             arquivos/build/Investe.AI.bat
