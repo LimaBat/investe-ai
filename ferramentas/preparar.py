@@ -14,7 +14,8 @@ src = open(os.path.join(RAIZ, "investe_ai.py"), encoding="utf-8").read()
 
 
 def troca_const(s, nome, valor):
-    novo, n = re.subn(rf'^{nome} = ".*"$', f'{nome} = {valor!r}'.replace("'", '"'), s, count=1, flags=re.M)
+    # aceita comentário no fim da linha (ex.: IA_CHAVE_GROQ = ""  # explicação)
+    novo, n = re.subn(rf'^{nome} = "[^"\n]*"', lambda m: f'{nome} = "{valor}"', s, count=1, flags=re.M)
     if n != 1: sys.exit(f"não achei a constante {nome} no código")
     return novo
 

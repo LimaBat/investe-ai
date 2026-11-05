@@ -80,15 +80,21 @@ jobs:
         with:
           name: mac
           path: Investe.AI-mac.zip
+      - name: Anexar o app de Mac à release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: Investe.AI-mac.zip
   publicar:
-    if: ${{ always() && github.event_name == 'release' && needs.windows.result == 'success' }}
-    needs: [windows, mac]
+    if: github.event_name == 'release'
+    needs: [windows]   # o Mac anexa o próprio arquivo quando ficar pronto (a fila de Mac do GitHub pode demorar)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: windows
           path: arquivos
-          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
@@ -96,4 +102,3 @@ jobs:
           files: |
             arquivos/dist/Investe.AI.exe
             arquivos/build/Investe.AI.bat
-            arquivos/Investe.AI-mac.zip
