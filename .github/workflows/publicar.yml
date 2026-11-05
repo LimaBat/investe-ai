@@ -31,7 +31,12 @@ jobs:
       - name: Instalar dependências
         run: python -m pip install --upgrade pip pyinstaller pillow -r requirements.txt
       - name: Gerar Investe.AI.exe
-        run: pyinstaller --noconfirm --onefile --windowed --name Investe.AI --icon investe-ai.ico --collect-all yfinance --collect-all curl_cffi --collect-data certifi build/investe_ai.py
+        run: pyinstaller --noconfirm --onefile --windowed --name Investe.AI --icon investe-ai.ico --collect-all yfinance --collect-all curl_cffi --collect-all webview --collect-data certifi build/investe_ai.py
+      - name: Testar a janela própria (pywebview empacotado)
+        shell: pwsh
+        run: |
+          $t = Start-Process -FilePath "dist\Investe.AI.exe" -ArgumentList "--teste-janela" -Wait -PassThru
+          if ($t.ExitCode -ne 0) { throw "a janela própria não está no .exe (código $($t.ExitCode))" }
       - name: Testar o .exe (abre sem janela e responde)
         shell: pwsh
         run: |
@@ -74,7 +79,7 @@ jobs:
       - run: python -m pip install --upgrade pip pyinstaller pillow -r requirements.txt
       - name: Gerar o app de Mac
         run: |
-          pyinstaller --noconfirm --windowed --name Investe.AI --icon investe-ai.png --collect-all yfinance --collect-all curl_cffi --collect-data certifi build/investe_ai.py
+          pyinstaller --noconfirm --windowed --name Investe.AI --icon investe-ai.png --collect-all yfinance --collect-all curl_cffi --collect-all webview --collect-data certifi build/investe_ai.py
           ditto -c -k --keepParent dist/Investe.AI.app Investe.AI-mac.zip
       - uses: actions/upload-artifact@v4
         with:

@@ -8,6 +8,53 @@ import os, sys, subprocess
 CONGELADO = bool(getattr(sys, "frozen", False))  # True no .exe / app gerado pelo PyInstaller
 ARQ_PROG = os.path.abspath(sys.executable if CONGELADO else __file__)
 _AQUI = os.path.dirname(ARQ_PROG)
+
+# ---- janela própria do programa (pywebview / WebView2): na barra de tarefas aparece como Investe.AI e pode ser fixada.
+# O programa principal abre esta janela rodando o próprio arquivo com "--janela <endereço>" (processo leve, sem o servidor).
+if "--janela" in sys.argv or "--teste-janela" in sys.argv:
+    try:
+        import webview
+    except Exception:
+        sys.exit(3)
+    if "--teste-janela" in sys.argv:
+        sys.exit(0)
+    import threading as _th, time as _t, urllib.request as _ur, urllib.error as _ue
+    _url = sys.argv[sys.argv.index("--janela") + 1] if sys.argv.index("--janela") + 1 < len(sys.argv) else ""
+    _pasta = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "Investe.AI") if os.name == "nt" \
+        else os.path.join(os.path.expanduser("~"), ".investe-ai")
+    os.makedirs(_pasta, exist_ok=True)
+
+    def _vigia(w):
+        """Avisa que a janela abriu e fecha a janela quando o programa é encerrado (botão Sair)."""
+        try:
+            with open(os.path.join(_pasta, "janela_ok"), "w") as _f: _f.write(str(os.getpid()))
+        except Exception:
+            pass
+        op, falhas = _ur.build_opener(_ur.ProxyHandler({})), 0
+        while True:
+            _t.sleep(3)
+            try:
+                atual = w.get_current_url() or _url
+            except Exception:
+                atual = _url
+            raiz = "/".join(str(atual).split("/")[:3])
+            try:
+                op.open(raiz + "/api/ping", timeout=3).read(); falhas = 0
+            except _ue.HTTPError:
+                falhas = 0  # o servidor respondeu (a tela de carregamento não tem /api/ping)
+            except Exception:
+                falhas += 1
+                if falhas >= 3:
+                    try: w.destroy()
+                    except Exception: pass
+                    return
+
+    try:
+        _w = webview.create_window("Investe.AI", _url, maximized=True, min_size=(900, 600), background_color="#0b1020")
+        webview.start(_vigia, _w, private_mode=False, storage_path=os.path.join(_pasta, "janela_webview"))
+    except Exception:
+        sys.exit(4)
+    sys.exit(0)
 # evita que arquivos .py soltos na mesma pasta do atalho substituam módulos do Python
 sys.path[:] = [p for p in sys.path if p and os.path.normcase(os.path.abspath(p)) != os.path.normcase(_AQUI)]
 
@@ -856,8 +903,33 @@ class _SplashHandler(BaseHTTPRequestHandler):
                                 "application/json; charset=utf-8")
         self._enviar(404, "{}", "application/json")
 
-def abrir_janela(url):
-    """Abre a janela do programa em tela cheia (Edge/Chrome em modo aplicativo)."""
+def abrir_janela(url, esperar=False):
+    """Abre a janela do programa: janela própria no .exe; senão (ou se ela falhar), Edge/Chrome em modo aplicativo."""
+    if CONGELADO and "--sem-janela-propria" not in sys.argv:
+        if esperar: return _janela_propria(url)
+        threading.Thread(target=_janela_propria, args=(url,), daemon=True).start()
+        return
+    _abrir_navegador(url)
+
+
+def _janela_propria(url):
+    marca = os.path.join(BASE, "janela_ok")
+    try:
+        try: os.remove(marca)
+        except OSError: pass
+        pj = subprocess.Popen([sys.executable, "--janela", url], close_fds=True, env=dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1"))
+        for _ in range(60):  # até 30 s: a janela avisa que abriu, ou o processo termina com erro
+            if os.path.exists(marca): return
+            if pj.poll() is not None: break
+            time.sleep(0.5)
+        if pj.poll() is None: return
+        log(f"Janela própria não abriu (código {pj.returncode}); usando o navegador.")
+    except Exception:
+        log("janela própria:\n" + traceback.format_exc())
+    _abrir_navegador(url)
+
+
+def _abrir_navegador(url):
     cands = [
         r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
         r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
@@ -935,7 +1007,7 @@ def _iniciar_splash():
         if url:
             log("O programa já estava aberto; abrindo outra janela em " + url)
             if "--no-window" not in sys.argv:
-                abrir_janela(url)
+                abrir_janela(url, esperar=True)
             os._exit(0)
     srv = _Servidor(("127.0.0.1", 0), _SplashHandler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -2711,7 +2783,8 @@ def api_atualizar():
             pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
             cmd = [pyw if os.path.exists(pyw) else exe, "-x", destino]
         # a versão nova abre a própria janela e fecha esta (o identificador de versão é diferente)
-        subprocess.Popen(cmd, close_fds=True, creationflags=0x00000008 | 0x00000200)
+        # PYINSTALLER_RESET_ENVIRONMENT: o .exe novo descompacta os próprios arquivos (não usa os desta versão)
+        subprocess.Popen(cmd, close_fds=True, creationflags=0x00000008 | 0x00000200, env=dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1"))
         log(f"Atualizando para a versão {info.get('versao')}")
         return {"ok": True, "versao": info.get("versao")}
     except Exception as e:

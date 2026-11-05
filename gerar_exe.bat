@@ -7,7 +7,7 @@ set "PY=py -3"
 %PY% --version >nul 2>&1 || set "PY=python"
 %PY% -m pip install --upgrade pip pyinstaller pillow -r requirements.txt || goto :erro
 %PY% ferramentas\preparar.py || goto :erro
-%PY% -m PyInstaller --noconfirm --onefile --windowed --name Investe.AI --icon investe-ai.ico --collect-all yfinance --collect-all curl_cffi --collect-data certifi build\investe_ai.py || goto :erro
+%PY% -m PyInstaller --noconfirm --onefile --windowed --name Investe.AI --icon investe-ai.ico --collect-all yfinance --collect-all curl_cffi --collect-all webview --collect-data certifi build\investe_ai.py || goto :erro
 echo.
 echo  Pronto: dist\Investe.AI.exe
 pause
