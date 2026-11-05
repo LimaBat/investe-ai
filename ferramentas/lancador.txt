@@ -1,0 +1,85 @@
+@echo off & goto :INVBAT_INICIO
+r'''
+:INVBAT_INICIO
+setlocal EnableExtensions DisableDelayedExpansion
+title Investe.AI
+set "INV_APP=%~f0"
+set "PYTHONUTF8=1"
+call :INVBAT_ACHAR
+if defined INV_PY goto :INVBAT_ABRIR
+echo.
+echo  ===================================================
+echo    INVESTE.AI - preparando o computador
+echo  ===================================================
+echo.
+echo  O Python 3 nao foi encontrado neste computador.
+echo  Vou instalar agora (so na primeira vez, pode levar
+echo  alguns minutos). Nao feche esta janela.
+echo.
+call :INVBAT_WINGET
+call :INVBAT_ACHAR
+if defined INV_PY goto :INVBAT_ABRIR
+call :INVBAT_BAIXAR
+call :INVBAT_ACHAR
+if defined INV_PY goto :INVBAT_ABRIR
+echo.
+echo  Nao consegui instalar o Python automaticamente.
+echo  Instale manualmente em https://www.python.org/downloads/
+echo  (marque "Add python.exe to PATH") e abra este arquivo de novo.
+echo.
+pause
+exit /b 1
+
+:INVBAT_ABRIR
+set "INV_PYW="
+if "%INV_PY%"=="py -3" set "INV_PYW=pyw -3"
+if "%INV_PY%"=="python" set "INV_PYW=pythonw"
+if not defined INV_PYW call :INVBAT_PYW %INV_PY%
+if not defined INV_PYW goto :INVBAT_CONSOLE
+start "" %INV_PYW% -x "%INV_APP%" %*
+exit /b 0
+
+:INVBAT_CONSOLE
+echo  Abrindo o Investe.AI...
+%INV_PY% -x "%INV_APP%" --iniciar %*
+exit /b 0
+
+:INVBAT_PYW
+if exist "%~dp1pythonw.exe" set INV_PYW="%~dp1pythonw.exe"
+exit /b 0
+
+:INVBAT_ACHAR
+set "INV_PY="
+call :INVBAT_TESTA py -3
+call :INVBAT_TESTA python
+for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do call :INVBAT_TESTA "%%~D\python.exe"
+for /d %%D in ("%ProgramFiles%\Python3*") do call :INVBAT_TESTA "%%~D\python.exe"
+for /d %%D in ("%LOCALAPPDATA%\Python\pythoncore-3*") do call :INVBAT_TESTA "%%~D\python.exe"
+call :INVBAT_TESTA "%LOCALAPPDATA%\Programs\Python\Launcher\py.exe" -3
+exit /b 0
+
+:INVBAT_TESTA
+if defined INV_PY exit /b 0
+%* -c "import sys;sys.exit(0 if sys.version_info>=(3,9) else 1)" >nul 2>&1
+if errorlevel 1 exit /b 0
+set INV_PY=%*
+exit /b 0
+
+:INVBAT_WINGET
+where winget >nul 2>&1
+if errorlevel 1 exit /b 0
+echo  [1/2] Instalando o Python 3.13 pelo winget...
+winget install -e --id Python.Python.3.13 --scope user --silent --accept-package-agreements --accept-source-agreements
+exit /b 0
+
+:INVBAT_BAIXAR
+echo  [1/2] Baixando o instalador do Python (python.org)...
+set "INV_INST=%TEMP%\python_instalador_investe_ai.exe"
+del "%INV_INST%" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue';[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;foreach($v in @('3.13.5','3.12.10','3.12.8')){try{Invoke-WebRequest -UseBasicParsing -Uri ('https://www.python.org/ftp/python/'+$v+'/python-'+$v+'-amd64.exe') -OutFile $env:INV_INST;break}catch{}}"
+if not exist "%INV_INST%" exit /b 0
+echo  [2/2] Instalando o Python (nao precisa de administrador)...
+start "" /wait "%INV_INST%" /quiet InstallAllUsers=0 InstallLauncherAllUsers=0 PrependPath=1 Include_launcher=1 Include_test=0
+del "%INV_INST%" >nul 2>&1
+exit /b 0
+'''

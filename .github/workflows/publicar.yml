@@ -1,0 +1,93 @@
+# Gera o Investe.AI.exe (Windows), o app de Mac e o Investe.AI.bat, testa o .exe e publica numa Release.
+# Para publicar uma versão: no GitHub, Releases > Draft a new release > crie a tag (v3.1, v3.2...) > Publish.
+# Os arquivos são gerados e anexados à release em uns 10 minutos. "Run workflow" (aba Actions) só gera, sem publicar.
+name: Publicar versão
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  IA_PROXY_URL: ${{ secrets.IA_PROXY_URL }}
+  IA_PROXY_TOKEN: ${{ secrets.IA_PROXY_TOKEN }}
+  ATUALIZA_REPO: ${{ github.repository }}
+  VERSAO: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TEM_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Preparar o código
+        run: python ferramentas/preparar.py
+      - name: Instalar dependências
+        run: python -m pip install --upgrade pip pyinstaller pillow -r requirements.txt
+      - name: Gerar Investe.AI.exe
+        run: pyinstaller --noconfirm --onefile --windowed --name Investe.AI --icon investe-ai.ico --collect-all yfinance --collect-all curl_cffi --collect-data certifi build/investe_ai.py
+      - name: Testar o .exe (abre sem janela e responde)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\Investe.AI.exe" -ArgumentList "--no-window" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            try { $r = Invoke-RestMethod -Uri "http://127.0.0.1:47615/api/ping" -TimeoutSec 3; if ($r.ok) { $ok = $true; break } } catch {}
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) { Get-Content "$env:LOCALAPPDATA\Investe.AI\investe_ai_log.txt" -ErrorAction SilentlyContinue; throw "o .exe não respondeu" }
+          Invoke-RestMethod -Uri "http://127.0.0.1:47615/" -TimeoutSec 30 | Out-Null
+          try { Invoke-RestMethod -Uri "http://127.0.0.1:47615/api/quit" -TimeoutSec 5 | Out-Null } catch {}
+      - name: Assinar o .exe (só se o certificado estiver nos segredos)
+        if: env.TEM_CERT == 'true'
+        shell: pwsh
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_SENHA: ${{ secrets.WINDOWS_CERT_SENHA }}
+        run: |
+          [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:CERT))
+          $st = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          & $st.FullName sign /f cert.pfx /p $env:CERT_SENHA /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\Investe.AI.exe
+          Remove-Item cert.pfx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/Investe.AI.exe
+            build/Investe.AI.bat
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python ferramentas/preparar.py
+      - run: python -m pip install --upgrade pip pyinstaller pillow -r requirements.txt
+      - name: Gerar o app de Mac
+        run: |
+          pyinstaller --noconfirm --windowed --name Investe.AI --icon investe-ai.png --collect-all yfinance --collect-all curl_cffi --collect-data certifi build/investe_ai.py
+          ditto -c -k --keepParent dist/Investe.AI.app Investe.AI-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: Investe.AI-mac.zip
+  publicar:
+    if: github.event_name == 'release'
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: arquivos
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            arquivos/dist/Investe.AI.exe
+            arquivos/build/Investe.AI.bat
+            arquivos/Investe.AI-mac.zip

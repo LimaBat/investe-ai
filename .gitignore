@@ -1,0 +1,6 @@
+build/
+dist/
+*.spec
+__pycache__/
+proxy-ia/.wrangler/
+proxy-ia/node_modules/
