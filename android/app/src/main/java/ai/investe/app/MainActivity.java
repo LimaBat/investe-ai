@@ -9,7 +9,6 @@ import android.os.Bundle;
 import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.os.SystemClock;
-import android.util.Base64;
 import android.util.Log;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -31,11 +30,6 @@ public class MainActivity extends Activity {
     String loginPendente = null;  // volta do login do Google (investeai://login?...)
     volatile boolean servidorPronto = false;
 
-    static final String CARREGANDO = "<html><body style='margin:0;background:#0b1020;color:#e8ecf6;font-family:sans-serif;"
-            + "display:flex;align-items:center;justify-content:center;height:100vh;text-align:center'><div>"
-            + "<div style='font-size:26px;font-weight:700;background:linear-gradient(135deg,#5eead4,#8b5cf6);-webkit-background-clip:text;color:transparent'>Investe.AI</div>"
-            + "<p style='color:#9aa6c0'>Carregando… na primeira vez pode levar até um minuto.</p></div></body></html>";
-
     @Override
     protected void onCreate(Bundle estado) {
         super.onCreate(estado);
@@ -47,6 +41,15 @@ public class MainActivity extends Activity {
         s.setSupportMultipleWindows(false);  // links que abrem nova aba caem no shouldOverrideUrlLoading
         s.setUserAgentString(s.getUserAgentString() + " InvesteAIAndroid/1");
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                if (limparHistorico && url != null && url.startsWith(ENDERECO)) {
+                    limparHistorico = false;
+                    v.clearHistory();
+                }
+            }
+
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
                 Uri u = req.getUrl();
@@ -69,13 +72,25 @@ public class MainActivity extends Activity {
         }
         setContentView(raiz);
         loginPendente = consultaLogin(getIntent());
-        mostrar(CARREGANDO);
+        carregando();
         iniciarPython();
         new Thread(this::esperarServidor).start();
     }
 
-    void mostrar(String html) {
-        web.loadData(Base64.encodeToString(html.getBytes(java.nio.charset.StandardCharsets.UTF_8), Base64.NO_PADDING), "text/html; charset=utf-8", "base64");
+    static final String TELA = "file:///android_asset/carregando.html";
+    boolean limparHistorico = false;
+
+    void carregando() {
+        web.loadUrl(TELA);
+    }
+
+    /** Termina a barra de progresso e entra no programa. */
+    void entrar(String url) {
+        web.evaluateJavascript("window.investePronto&&investePronto()", null);
+        web.postDelayed(() -> {
+            limparHistorico = true;  // o "voltar" não deve cair na tela de carregamento
+            web.loadUrl(url);
+        }, 1100);
     }
 
     synchronized void iniciarPython() {
@@ -108,7 +123,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         String q = loginPendente;
                         loginPendente = null;
-                        web.loadUrl(q != null ? ENDERECO + "oauth/google/callback?" + q + "&fg=1" : ENDERECO);
+                        entrar(q != null ? ENDERECO + "oauth/google/callback?" + q + "&fg=1" : ENDERECO);
                     });
                     return;
                 }
@@ -117,9 +132,8 @@ public class MainActivity extends Activity {
             SystemClock.sleep(500);
         }
         final String msg = erroPython != null ? erroPython : "O programa demorou demais para abrir.";
-        runOnUiThread(() -> mostrar("<html><body style='background:#0b1020;color:#e8ecf6;font-family:sans-serif;padding:24px'>"
-                + "<h2>Não consegui abrir o Investe.AI</h2><p>Feche o app e abra de novo. Se continuar, avise o desenvolvedor.</p>"
-                + "<p style='color:#9aa6c0;font-size:12px'>" + android.text.Html.escapeHtml(msg) + "</p></body></html>"));
+        final String texto = "Não consegui abrir o Investe.AI. Feche o app e abra de novo. Se continuar, avise o desenvolvedor. (" + msg + ")";
+        runOnUiThread(() -> web.evaluateJavascript("window.investeFalha&&investeFalha(" + org.json.JSONObject.quote(texto) + ")", null));
     }
 
     static String consultaLogin(Intent i) {
@@ -144,7 +158,7 @@ public class MainActivity extends Activity {
         super.onResume();
         if (!pythonIniciado) {  // o sistema encerrou o Python em segundo plano: inicia de novo
             servidorPronto = false;
-            mostrar(CARREGANDO);
+            carregando();
             erroPython = null;
             iniciarPython();
             new Thread(this::esperarServidor).start();
