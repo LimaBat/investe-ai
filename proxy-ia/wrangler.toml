@@ -1,6 +1,8 @@
 name = "investe-ai-ia"
 main = "worker.js"
 compatibility_date = "2025-06-01"
+workers_dev = true
+preview_urls = false
 
 # Limite de perguntas por pessoa: 20 por minuto. Se o comando "deploy" reclamar deste bloco, apague-o
 # (o intermediário funciona sem ele, só fica sem limite por pessoa).
