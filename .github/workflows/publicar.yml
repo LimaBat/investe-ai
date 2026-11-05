@@ -94,7 +94,7 @@ jobs:
           tag_name: ${{ github.event.release.tag_name }}
           files: Investe.AI-mac.zip
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # já vem com o Android SDK instalado
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +105,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
@@ -117,6 +116,8 @@ jobs:
           IFS=. read -r A B C <<< "$V"
           echo "VNOME=$V" >> $GITHUB_ENV
           echo "VCOD=$(( ${A:-0}*10000 + ${B:-0}*100 + ${C:-0} ))" >> $GITHUB_ENV
+      - name: Conferir o Android SDK
+        run: echo "ANDROID_HOME=$ANDROID_HOME"; ls "$ANDROID_HOME" | head; yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Gerar APK de teste (emulador)
         run: gradle -p android assembleDebug -Pabis=x86_64 -PversaoNome=$VNOME -PversaoCodigo=$VCOD --stacktrace
       - name: Ligar a aceleração do emulador
