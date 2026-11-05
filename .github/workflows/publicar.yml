@@ -1,10 +1,13 @@
 # Gera o Investe.AI.exe (Windows), o app de Mac e o Investe.AI.bat, testa o .exe e publica numa Release.
 # Para publicar uma versão: no GitHub, Releases > Draft a new release > crie a tag (v3.1, v3.2...) > Publish.
-# Os arquivos são gerados e anexados à release em uns 10 minutos. "Run workflow" (aba Actions) só gera, sem publicar.
+# Os arquivos são gerados e anexados à release em uns 10 minutos. Envios para a main e "Run workflow" (aba Actions) só geram e testam, sem publicar.
 name: Publicar versão
 on:
   release:
     types: [published]
+  push:
+    branches: [main]   # a cada alteração: só gera e testa (não publica)
+    paths-ignore: ["**.md"]
   workflow_dispatch:
 permissions:
   contents: write
