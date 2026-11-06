@@ -68,6 +68,17 @@ h1{font-size:clamp(34px,10.5vw,44px)}
 .info{font-size:12.5px;gap:10px;text-align:left}
 .erro{font-size:13.5px;max-width:88vw}
 .aviso{bottom:16px;padding:0 24px;font-size:11.5px;line-height:1.4}
+/* celular: só animações que a placa de vídeo faz sozinha (transform e opacity), para ficar fluido enquanto o app inicia */
+.orb{filter:none;opacity:.5;will-change:transform}
+.orb.a{width:520px;height:520px;top:-230px;right:-200px;background:radial-gradient(circle,rgba(139,92,246,.75) 0,rgba(139,92,246,.28) 34%,rgba(139,92,246,0) 68%)}
+.orb.b{width:500px;height:500px;bottom:-230px;left:-200px;background:radial-gradient(circle,rgba(94,234,212,.6) 0,rgba(94,234,212,.22) 34%,rgba(94,234,212,0) 68%)}
+.grid{animation:none}
+.bars i{will-change:transform}
+.logo .anel{filter:none;will-change:transform}
+.logo .pulso,.logo .nucleo{will-change:transform,opacity}
+h1{animation:none;background-size:100% auto;background-image:linear-gradient(90deg,#5eead4,#8b5cf6 60%,#c084fc)}
+.trilho i{width:100%!important;transform:scaleX(0);transform-origin:left center;box-shadow:none;will-change:transform}
+.trilho i::after{display:none}
 </style></head><body>
 <div class="bg"></div><div class="grid"></div><div class="orb a"></div><div class="orb b"></div>
 <div class="bars" id="bars"></div>
@@ -86,7 +97,7 @@ var barras=document.getElementById('bars');
 var n=Math.max(16,Math.min(30,Math.round(window.innerWidth/16)));
 for(var i=0;i<n;i++){var b=document.createElement('i');b.style.height=(30+Math.random()*70)+'%';b.style.animationDelay=(-Math.random()*2.6)+'s';b.style.animationDuration=(2+Math.random()*2.2)+'s';barras.appendChild(b);}
 var bar=document.getElementById('bar'),pct=document.getElementById('pct'),msg=document.getElementById('msg'),erro=document.getElementById('erro');
-var t0=performance.now(),mostrado=0,pronto=false,parou=false,ultMsg='';
+var ultPct=-1,t0=performance.now(),mostrado=0,pronto=false,parou=false,ultMsg='';
 var etapas=[[0,4,'Iniciando'],[1500,18,'Verificando componentes'],[4000,40,'Carregando componentes'],[9000,62,'Carregando dados de mercado'],[16000,80,'Iniciando o servidor'],[30000,92,'Quase pronto']];
 function setMsg(t){if(!t||t===ultMsg)return;ultMsg=t;msg.classList.add('troca');setTimeout(function(){msg.textContent=t;msg.classList.remove('troca');},230);}
 function quadro(){
@@ -97,7 +108,7 @@ function quadro(){
   setMsg(m);
   var teto=pronto?100:Math.min(alvo,96);
   if(mostrado<teto)mostrado=Math.min(teto,mostrado+Math.max(pronto?.9:.06,(teto-mostrado)*(pronto?.14:.03)));
-  bar.style.width=mostrado+'%';pct.textContent=Math.floor(mostrado)+'%';
+  bar.style.transform='scaleX('+(mostrado/100).toFixed(4)+')';var p=Math.floor(mostrado);if(p!==ultPct){ultPct=p;pct.textContent=p+'%';}
   if(pronto&&mostrado>=99.6&&!document.body.classList.contains('saindo'))document.body.classList.add('saindo');
   requestAnimationFrame(quadro);
 }

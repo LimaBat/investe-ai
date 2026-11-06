@@ -4389,6 +4389,26 @@ select.sel.moe-sel{padding:11px 14px;font-size:14.5px;width:100%}
 .atu-b{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:1300;display:flex;align-items:center;gap:12px;max-width:min(720px,94vw);padding:12px 16px;border:1px solid var(--accent);border-radius:16px;background:var(--bg2);box-shadow:0 20px 50px rgba(0,0,0,.45)}.atu-b>div{flex:1;min-width:0}.atu-b .sub{display:block;font-size:12.5px}
 body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #dx-arq{display:none}
 
+/* tutorial da primeira vez (sem blur: fica leve no celular) */
+#tut{position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:rgba(5,8,18,.62);pointer-events:auto}
+@media(min-width:761px){#tut{align-items:center;justify-content:flex-end;padding:32px 48px}}
+.tut-card{width:min(440px,100%);background:var(--bg2);border:1px solid var(--line);border-radius:20px;padding:20px 22px 18px;box-shadow:0 24px 60px -12px rgba(0,0,0,.6),0 0 0 1px rgba(139,92,246,.18)}
+.tut-in{animation:tutIn .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes tutIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.tut-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.tut-n{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.tut-x{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:13px;padding:6px 2px}
+.tut-x:hover{color:var(--text)}
+.tut-card h2{margin:0 0 10px;font-size:22px}
+.tut-t{color:var(--muted);line-height:1.55;font-size:14.5px}
+.tut-t b{color:var(--text)}
+.tut-pts{display:flex;flex-wrap:wrap;gap:5px;margin:16px 0 14px}
+.tut-pts i{width:7px;height:7px;border-radius:9px;background:var(--line);transition:.2s}
+.tut-pts i.on{width:20px;background:linear-gradient(90deg,var(--accent2),var(--accent))}
+.tut-bt{display:flex;justify-content:space-between;gap:10px}
+.tut-anel{position:fixed;display:none;pointer-events:none;border-radius:14px;box-shadow:0 0 0 2px var(--accent),0 0 22px 2px rgba(94,234,212,.45);animation:tutPulso 1.6s ease-in-out infinite;transition:left .25s,top .25s,width .25s,height .25s}
+@keyframes tutPulso{50%{box-shadow:0 0 0 2px var(--accent),0 0 6px 0 rgba(94,234,212,.2)}}
+
 </style>
 </head>
 <body>
@@ -7370,7 +7390,7 @@ function ctxExtra(v){let c=MOE.c!=='BRL'?`Moeda escolhida pelo usuário para ver
 function anConv(){const e=$('#an-conv');if(!e||!ANA||!ANA.d)return;const x=ANA.d.extra||{},nat=x.moeda||'BRL',v=ANA.d.preco;
   if(String(ANA.d.ticker||'').startsWith('^')||nat===MOE.c){e.textContent='';return;}const y=cvt(v,nat);e.textContent=y==null?'':'≈ '+moeSimb()+' '+fmtP(y)+' ('+MOE.c+')';}
 /* ---------- conta: pasta dos dados e backup ---------- */
-function dadosHtmlExtra(){return `<div class="card mt"><h2>Moeda do programa</h2><p class="sub">Escolha em que moeda o Investe.AI mostra patrimônio, preços e valores. A conversão usa a cotação do dia${MOE.hora?' (atualizada às '+esc(MOE.hora)+')':''}. Lançamentos, renda fixa e imposto de renda continuam registrados em reais, e índices como o Ibovespa ficam em pontos.</p><select class="sel moe-sel" id="moe-conta" style="max-width:340px;margin-top:10px"></select></div><div class="card mt"><h2>Seus dados neste computador</h2><p class="sub">Carteira, lançamentos, alertas, favoritos e configurações ficam em <code>${esc(PASTA_DADOS)}</code>. O programa fica instalado nesta mesma pasta e é aberto pelo atalho Investe.AI da Área de Trabalho; o arquivo baixado pode ser apagado.</p><div class="tb2" style="margin-bottom:0"><button class="btn ghost sm" type="button" id="dx-pasta">Abrir a pasta dos dados</button><button class="btn ghost sm" type="button" id="dx-exp">Exportar backup</button><button class="btn ghost sm" type="button" id="dx-imp">Restaurar backup</button><input type="file" id="dx-arq" accept=".json,application/json" style="display:none"></div></div><div class="card mt"><h2>Versão</h2><p class="sub">Investe.AI versão <b>${esc((window.__DADOS__||{}).versao||'')}</b>. <span id="atu-st"></span></p><div class="tb2" style="margin-bottom:0"><button class="btn ghost sm" type="button" id="atu-ver">Verificar atualizações</button></div></div>`;}
+function dadosHtmlExtra(){return `<div class="card mt"><h2>Moeda do programa</h2><p class="sub">Escolha em que moeda o Investe.AI mostra patrimônio, preços e valores. A conversão usa a cotação do dia${MOE.hora?' (atualizada às '+esc(MOE.hora)+')':''}. Lançamentos, renda fixa e imposto de renda continuam registrados em reais, e índices como o Ibovespa ficam em pontos.</p><select class="sel moe-sel" id="moe-conta" style="max-width:340px;margin-top:10px"></select></div><div class="card mt"><h2>Seus dados neste computador</h2><p class="sub">Carteira, lançamentos, alertas, favoritos e configurações ficam em <code>${esc(PASTA_DADOS)}</code>. O programa fica instalado nesta mesma pasta e é aberto pelo atalho Investe.AI da Área de Trabalho; o arquivo baixado pode ser apagado.</p><div class="tb2" style="margin-bottom:0"><button class="btn ghost sm" type="button" id="dx-pasta">Abrir a pasta dos dados</button><button class="btn ghost sm" type="button" id="dx-exp">Exportar backup</button><button class="btn ghost sm" type="button" id="dx-imp">Restaurar backup</button><input type="file" id="dx-arq" accept=".json,application/json" style="display:none"></div></div><div class="card mt"><h2>Versão</h2><p class="sub">Investe.AI versão <b>${esc((window.__DADOS__||{}).versao||'')}</b>. <span id="atu-st"></span></p><div class="tb2" style="margin-bottom:0"><button class="btn ghost sm" type="button" id="atu-ver">Verificar atualizações</button><button class="btn ghost sm" type="button" id="tut-ver">Ver tutorial</button></div></div>`;}
 function usrBindExtra(){
   moeLigaSel($('#moe-conta'));
   const av=$('#atu-ver');if(av)av.onclick=async()=>{const st=$('#atu-st');av.disabled=true;st.textContent='Verificando…';
@@ -7457,6 +7477,60 @@ setTimeout(()=>sincConta(true),1500);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')sincConta(false);});
 window.addEventListener('focus',()=>sincConta(false));
 setInterval(()=>{if(document.visibilityState==='visible')sincConta(false);},45000);
+
+/* ---------- tutorial da primeira vez: o que é cada aba e como usar ---------- */
+const TUT=[
+ ['Bem-vindo ao Investe.AI',null,'Aqui você aprende a investir numa <b>corretora simulada</b>: começa com R$ 1.000 fictícios e compra e vende ações, fundos imobiliários, cripto e moedas com <b>preços reais</b>. Nenhum dinheiro de verdade é usado.<br><br>Em um minuto você vê o que cada aba faz.'],
+ ['Início','home','O painel do dia: juros (Selic), inflação (IPCA), dólar e euro, o saldo da sua corretora simulada e um resumo do mercado feito pela IA.<br><br><b>Como usar:</b> os botões <b>Depositar</b>, <b>Comprar / vender</b> e <b>Ver carteira</b> são atalhos para a sua carteira.'],
+ ['Mercado','mercado','Como está a bolsa agora: índices, mapa de calor das ações, maiores altas e baixas, moedas, commodities e criptomoedas.<br><br><b>Como usar:</b> toque em um ativo para abrir a análise dele.'],
+ ['Notícias','noticias','Notícias gerais do mercado e notícias de cada ativo, com os temas que podem mexer com o preço.<br><br><b>Como usar:</b> em <b>Por ativo</b>, digite um código, como PETR4.'],
+ ['Analisar ativo','analisar','Preço, gráfico, indicadores, fatores de influência, eventos e notícias de um ativo.<br><br><b>Como usar:</b> digite um código (PETR4, MXRF11, AAPL, BTC ou USD) e toque em <b>Analisar</b>. Dali você pode favoritar o ativo ou comprá-lo no simulador.'],
+ ['Comparar','comparar','Coloca ativos lado a lado: qual rendeu mais, qual oscilou mais e se eles andam juntos.<br><br><b>Como usar:</b> comece por uma das <b>comparações prontas</b> ou digite dois ou mais códigos.'],
+ ['Ranking','ranking','Compara vários ativos pelos mesmos critérios: tendência, preço, rentabilidade, risco e dividendos.<br><br><b>Como usar:</b> escolha uma lista pronta ou digite seus códigos e toque em <b>Comparar</b>.'],
+ ['Minha carteira','invest','Sua corretora simulada. Deposite e saque dinheiro fictício, compre e venda com preços reais e acompanhe posição, extrato, renda fixa e o gráfico da carteira.<br><br><b>Como usar:</b> toque em <b>Comprar / vender</b>, digite o código e a quantidade ou o valor. Na aba <b>Investir de verdade</b> estão apps reais para quando você quiser começar.'],
+ ['Alertas','alertas','Um aviso quando um ativo chegar ao preço que você quer ou variar muito no dia.<br><br><b>Como usar:</b> digite o código, escolha a condição e o preço. Os alertas são conferidos enquanto o Investe.AI estiver aberto.'],
+ ['Montar carteira','carteira','Mostra como dividir o dinheiro entre renda fixa, ações, fundos e exterior de acordo com o seu perfil de risco.<br><br><b>Como usar:</b> informe o valor e o seu perfil, ou descubra o perfil pelo <b>Questionário</b>.'],
+ ['Plano por cenário','plano','Como a sua carteira se comporta no dia, na semana, no mês e no ano, e o que fazer em cada cenário de alta ou de queda.<br><br><b>Como usar:</b> use o mesmo perfil da aba Montar carteira e, se quiser, adicione seus ativos.'],
+ ['Simulador','simulador','Calculadoras para testar cenários antes de investir, como quanto o dinheiro rende com o tempo e qual é o seu preço médio.<br><br><b>Como usar:</b> escolha uma calculadora e preencha os campos. Cada campo tem uma explicação.'],
+ ['Aprender','aprender','Os fundamentos: tipos de investimento e o que move os preços, com analogias e exemplos.<br><br><b>Como usar:</b> toque em um item para abri-lo.'],
+ ['Academia','academia','Aulas para quem está começando e para quem quer ir mais fundo, além de cartões de memória, quiz e checklist.'],
+ ['Glossário','glossario','Os termos que você mais vai ouvir, cada um com uma explicação simples e um exemplo, e uma trilha de estudos na ordem certa.'],
+ ['Jogos','jogos','Descubra qual investimento combina com você e teste decisões jogando, sem arriscar dinheiro. Cada partida rende XP.'],
+ ['Conta','conta','Entre com o Google para guardar a sua carteira e usá-la no computador e no celular. A conta fica aberta em um aparelho por vez.<br><br>Aqui também ficam a moeda do programa, os sons, a versão e este tutorial (<b>Ver tutorial</b>).'],
+ ['Assistente de IA','#ia-fab','O botão <b>IA</b>, no canto da tela, abre o assistente. Pergunte sobre um ativo, um conceito ou uma notícia, por exemplo: "vale a pena investir em PETR4?".<br><br>Pronto! Você pode rever este tutorial quando quiser em <b>Conta</b>.'],
+];
+let TUTi=0;
+function tutAlvo(a){if(!a)return null;return a[0]==='#'?$(a):document.querySelector('nav button[data-v="'+a+'"]');}
+function tutLimpa(){const a=$('#tut .tut-anel');if(a)a.style.display='none';}
+function tutAnel(){const o=$('#tut');if(!o)return;const an=o.querySelector('.tut-anel'),el=tutAlvo(TUT[TUTi][1]);if(!el||!el.offsetParent){an.style.display='none';return;}const r=el.getBoundingClientRect();Object.assign(an.style,{display:'block',left:(r.left-4)+'px',top:(r.top-4)+'px',width:(r.width+8)+'px',height:(r.height+8)+'px'});}
+function tutLayout(){const o=$('#tut');if(!o)return;const as=document.querySelector('aside');o.style.bottom=(innerWidth<=760&&as)?as.offsetHeight+'px':'0px';}
+window.addEventListener('resize',()=>{tutLayout();tutAnel();});
+function tutFecha(){tutLimpa();const o=$('#tut');if(o)o.remove();try{localStorage.setItem('inv_tutorial','1');}catch(e){}const b=document.querySelector('nav button[data-v="home"]');if(b)b.click();}
+function tutMostra(i){
+  TUTi=Math.max(0,Math.min(TUT.length-1,i));const [t,a,txt]=TUT[TUTi];tutLimpa();
+  if(a&&a[0]!=='#'){const b=tutAlvo(a);if(b){b.click();try{b.scrollIntoView({block:'nearest',inline:'center'});}catch(e){}}}
+  tutLayout();setTimeout(tutAnel,60);setTimeout(tutAnel,400);
+  const o=$('#tut');o.querySelector('.tut-n').textContent=(TUTi+1)+' de '+TUT.length;
+  o.querySelector('h2').textContent=t;o.querySelector('.tut-t').innerHTML=txt;
+  o.querySelector('.tut-pts').innerHTML=TUT.map((_,k)=>'<i class="'+(k===TUTi?'on':'')+'"></i>').join('');
+  o.querySelector('[data-t=ant]').style.visibility=TUTi?'visible':'hidden';
+  o.querySelector('[data-t=prox]').textContent=TUTi===TUT.length-1?'Começar a usar':'Próximo';
+  o.querySelector('.tut-card').classList.remove('tut-in');void o.querySelector('.tut-card').offsetWidth;o.querySelector('.tut-card').classList.add('tut-in');
+}
+function tutorial(){
+  if($('#tut'))return;try{iaAbrir(false);}catch(e){}
+  const o=document.createElement('div');o.id='tut';
+  o.innerHTML='<div class="tut-anel"></div><div class="tut-card" role="dialog" aria-modal="true"><div class="tut-top"><span class="tut-n"></span><button type="button" class="tut-x" data-t="sair">Pular tutorial</button></div><h2></h2><div class="tut-t"></div><div class="tut-pts"></div><div class="tut-bt"><button type="button" class="btn ghost" data-t="ant">Voltar</button><button type="button" class="btn" data-t="prox">Próximo</button></div></div>';
+  document.body.appendChild(o);
+  o.addEventListener('click',e=>{const k=e.target.closest('[data-t]');if(!k)return;const t=k.dataset.t;if(t==='sair')tutFecha();else if(t==='ant')tutMostra(TUTi-1);else if(TUTi===TUT.length-1)tutFecha();else tutMostra(TUTi+1);});
+  tutMostra(0);
+}
+document.addEventListener('keydown',e=>{if(!$('#tut'))return;if(e.key==='ArrowRight')tutMostra(TUTi+1);else if(e.key==='ArrowLeft')tutMostra(TUTi-1);else if(e.key==='Escape')tutFecha();});
+document.addEventListener('click',e=>{if(e.target&&e.target.id==='tut-ver')tutorial();});
+/* primeira vez neste aparelho e sem nada salvo ainda: abre o tutorial */
+setTimeout(()=>{try{if(localStorage.getItem('inv_tutorial'))return;const d=(window.__DADOS__||{}).dados||{};
+  const usado=['sim_movs','lanc','favs','alertas','rf','sim_lanc'].some(k=>{const v=d[k];return v&&(Array.isArray(v)?v.length:Object.keys(v).length);});
+  if(usado){localStorage.setItem('inv_tutorial','1');return;}tutorial();}catch(e){}},1200);
 
 </script>
 </body>
