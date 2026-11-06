@@ -2551,21 +2551,38 @@ PER_YF = {"1d": ("1d", "5m"), "5d": ("5d", "30m"), "1mo": ("1mo", "1d"), "6mo": 
           "2y": ("2y", "1d"), "5y": ("5y", "1d"), "max": ("max", "1wk")}
 INTRA = ("1d", "5d")
 
-def _hist_df(tk, per):
-    """Histórico OHLCV com cache (horário de Brasília no intradiário)."""
+# intervalos dos gráficos (velas de 1 minuto a 1 semana) e os períodos que o Yahoo Finance entrega em cada um
+INTERVALOS = ("1m", "5m", "15m", "1h", "1d", "1wk")
+IV_PER_OK = {"1m": ("1d", "5d"), "5m": ("1d", "5d", "1mo"), "15m": ("1d", "5d", "1mo"), "1h": ("1d", "5d", "1mo", "6mo", "1y"),
+             "1d": ("5d", "1mo", "6mo", "1y", "2y", "5y", "max"), "1wk": ("6mo", "1y", "2y", "5y", "max")}
+
+
+def _iv_valido(per, iv):
     per = per if per in PER_YF else "1y"
-    k = f"h:{tk}:{per}"
-    c = cache_get(k, 90 if per in INTRA else (150 if per in ("1mo", "5d") else 600))
+    return iv if iv in IV_PER_OK and per in IV_PER_OK[iv] else PER_YF[per][1]
+
+
+def _iv_intra(iv):
+    return iv[-1] in "mh" and iv != "1mo"
+
+
+def _hist_df(tk, per, iv=None):
+    """Histórico OHLCV com cache (horário de Brasília no intradiário). iv: intervalo das velas (1m, 5m, 15m, 1h, 1d, 1wk)."""
+    per = per if per in PER_YF else "1y"
+    i = _iv_valido(per, iv) if iv else PER_YF[per][1]
+    intra = _iv_intra(i)
+    k = f"h:{tk}:{per}" + ("" if not iv else ":" + i)
+    c = cache_get(k, (30 if i == "1m" else 60) if intra else (150 if per in ("1mo", "5d") else 600))
     if c is not None: return c
-    p, i = PER_YF[per]
-    df = yf.Ticker(tk).history(period=p, interval=i, auto_adjust=True)
+    p = PER_YF[per][0]
+    df = yf.Ticker(tk).history(period=p, interval="60m" if i == "1h" else i, auto_adjust=True)
     if df is None or len(df) == 0 or "Close" not in df.columns: return None
     cols = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in df.columns]
     df = df[cols].copy()
     df = df[df["Close"].notna()]
     if len(df) < 2: return None
     idx = pd.DatetimeIndex(df.index)
-    if per in INTRA:  # horário de Brasília (sem horário de verão desde 2019)
+    if intra:  # horário de Brasília (sem horário de verão desde 2019)
         idx = (idx.tz_convert("UTC") if idx.tz is not None else idx).tz_localize(None) - pd.Timedelta(hours=3)
     else:
         if idx.tz is not None: idx = idx.tz_localize(None)
@@ -2579,6 +2596,13 @@ def _serie_yf(tk, per):
     df = _hist_df(tk, per)
     return None if df is None else df["Close"]
 
+
+
+def _rotulos_iv(idx, per, intra):
+    if intra:
+        f = "%H:%M" if per == "1d" else "%d/%m %H:%M"
+        return [d.strftime(f) for d in idx], [d.strftime("%d/%m/%Y %H:%M") for d in idx]
+    return _rotulos(idx, per)
 def _rotulos(idx, per):
     f = {"1d": "%H:%M", "5d": "%d/%m %H:%M", "max": "%m/%Y"}.get(per, "%d/%m/%y")
     f2 = "%d/%m/%Y %H:%M" if per in INTRA else "%d/%m/%Y"
@@ -3115,15 +3139,17 @@ def _agrega(df, regra):
     return df.resample(regra).agg({k: v for k, v in ag.items() if k in df.columns}).dropna(subset=["Close"])
 
 
-def api_ohlc(ticker, per):
+def api_ohlc(ticker, per, iv=""):
     if not TICKER_RE.match(ticker or ""): return {"erro": "Código inválido."}
     per = per if per in PER_YF else "1y"
     tk = inv.normalizar(ticker)
-    df = _hist_df(tk, per)
+    ivu = _iv_valido(per, iv) if iv else PER_YF[per][1]
+    df = _hist_df(tk, per, iv or None)
     if df is None:
-        return {"erro": f"Sem dados para {tk} neste período. Com o mercado fechado, tente 5 dias."}
+        return {"erro": f"Sem dados para {tk} neste período e intervalo. Com o mercado fechado, tente 5 dias."}
+    intra = _iv_intra(ivu)
     agreg = None
-    if per not in INTRA and len(df) > 560:
+    if not iv and not intra and len(df) > 560:
         df = _agrega(df, "W-FRI")
         agreg = "semana"
         if len(df) > 560:
@@ -3132,12 +3158,59 @@ def api_ohlc(ticker, per):
             except Exception:
                 df = _agrega(df, "M")
             agreg = "mês"
-    lb, lb2 = _rotulos(df.index, per)
+    lb, lb2 = _rotulos_iv(df.index, per, intra)
     col = lambda k: [None if (v != v) else round(float(v), 6) for v in df[k]] if k in df.columns else None
     c = col("Close")
     ret = (c[-1] / c[0] - 1) * 100 if c and c[0] else None
-    return limpa({"ticker": tk, "per": per, "agreg": agreg, "lb": lb, "lb2": lb2, "o": col("Open"), "h": col("High"),
+    return limpa({"ticker": tk, "per": per, "iv": ivu, "agreg": agreg, "lb": lb, "lb2": lb2, "o": col("Open"), "h": col("High"),
                   "l": col("Low"), "c": c, "v": col("Volume"), "ret": ret})
+
+
+def api_carteira_intra(tickers, per, iv):
+    """Preço em reais de cada ativo da carteira, vela a vela (minutos ou horas), para montar o patrimônio intradiário."""
+    lst = []
+    for t in (tickers or "").split(","):
+        t = t.strip().upper()
+        if t and TICKER_RE.match(t) and t not in lst: lst.append(t)
+    lst = lst[:40]
+    per = per if per in ("1d", "5d", "1mo", "6mo", "1y") else "5d"
+    iv = _iv_valido(per, iv)
+    if not _iv_intra(iv): return {"erro": "Intervalo inválido."}
+    sym = {t: inv.normalizar(t) for t in lst}
+    fxs = {}
+    for t, s_ in sym.items():
+        m = _moeda(s_)
+        if m and m != "BRL":
+            fxs[m] = (_FX_CENTAVOS.get(m, m).upper() + "BRL=X", 100.0 if m in _FX_CENTAVOS else 1.0)
+
+    def um(s_):
+        try:
+            df = _hist_df(s_, per, iv)
+            return s_, (None if df is None else df["Close"])
+        except Exception:
+            return s_, None
+    with ThreadPoolExecutor(8) as ex:
+        res = dict(ex.map(um, sorted(set(sym.values()) | {v[0] for v in fxs.values()})))
+    series = {}
+    for t, s_ in sym.items():
+        if res.get(s_) is not None and len(res[s_]): series[t] = res[s_]
+    if not series: return {"erro": "Não consegui o histórico intradiário agora."}
+    df = pd.concat(series, axis=1).sort_index()
+    df = df[~df.index.duplicated(keep="last")].ffill().bfill()
+    for t in df.columns:
+        m = _moeda(sym[t])
+        if m and m != "BRL":
+            fs, dv = fxs[m]
+            fx = res.get(fs)
+            if fx is not None and len(fx):
+                f = fx[~fx.index.duplicated(keep="last")].reindex(fx.index.union(df.index)).sort_index().ffill().bfill().reindex(df.index)
+                df[t] = df[t] * f.values / dv
+            else:
+                df[t] = df[t] * (_fx_brl(m) or 1.0)
+    pos = _posicoes(len(df), 1500)
+    return limpa({"iv": iv, "t": [df.index[i].strftime("%Y-%m-%dT%H:%M") for i in pos],
+                  "s": {c: [None if pd.isna(df[c].iloc[i]) else round(float(df[c].iloc[i]), 6) for i in pos] for c in df.columns},
+                  "faltando": [t for t in lst if t not in df.columns]})
 
 
 # ---- proventos e desdobramentos
@@ -3713,7 +3786,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/comparar": lambda: api_comparar(q.get("tickers", ""), q.get("periodo", "1y")),
                 "/api/mercado": lambda: api_mercado(q.get("novo") == "1"),
                 "/api/focus": lambda: api_focus(),
-                "/api/ohlc": lambda: api_ohlc(q.get("ticker", ""), q.get("periodo", "1y")),
+                "/api/ohlc": lambda: api_ohlc(q.get("ticker", ""), q.get("periodo", "1y"), q.get("intervalo", "")),
+                "/api/carteira/intra": lambda: api_carteira_intra(q.get("tickers", ""), q.get("periodo", "5d"), q.get("intervalo", "15m")),
                 "/api/proventos": lambda: api_proventos(q.get("ticker", "")),
                 "/api/busca": lambda: api_busca(q.get("q", "")),
                 "/api/fx": lambda: api_fx(),
@@ -4416,6 +4490,10 @@ body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #d
 .gv-tabs .chip{display:inline-flex;align-items:center;gap:6px}.gv-dot{width:8px;height:8px;border-radius:9px;display:inline-block}
 @media(max-width:760px){canvas#gv-cv.gp{height:320px}}
 
+.gp-tools .gp-rot{font-size:12px;color:var(--muted);margin:0 2px 0 4px}.gp-tools .chip.fora{opacity:.5}
+.zoom-reset{position:absolute;top:14px;right:14px;z-index:3;padding:5px 12px!important;font-size:12px!important;background:var(--bg2)!important}
+canvas.gp{cursor:crosshair}
+
 </style>
 </head>
 <body>
@@ -4842,7 +4920,7 @@ document.addEventListener('mouseleave',()=>tipEl.style.opacity=0);document.addEv
 const brl=v=>'R$ '+fmt(v,2), abrev=v=>v>=1e6?(v/1e6).toFixed(1)+' mi':v>=1e3?(v/1e3).toFixed(0)+' mil':v.toFixed(0);
 const N=id=>parseFloat(String(($('#c-'+id)||{}).value||'0').replace(',','.'))||0, mes=a=>Math.pow(1+a/100,1/12)-1;
 const st=(l,v,e,c='')=>`<div class="card stat"><div class="lb">${l}</div><div class="vl ${c||'grad'}" style="font-size:24px">${v}</div><div class="ex">${e||''}</div></div>`;
-function svgChart(host,labels,series,fm=brl,zoom=false){
+function svgChartBase(host,labels,series,fm=brl,zoom=false){
   const W=700,H=280,p={l:64,r:12,t:10,b:24},mx=Math.max(1,...series.flatMap(s=>s.v)),mn=zoom?Math.min(...series.flatMap(s=>s.v))*.97:0;
   const X=i=>p.l+(W-p.l-p.r)*i/Math.max(1,labels.length-1),Y=v=>p.t+(H-p.t-p.b)*(1-(v-mn)/((mx-mn)||1));let g='';
   for(let i=0;i<=4;i++){const v=mn+(mx-mn)*i/4;g+=`<line x1="${p.l}" x2="${W-p.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${p.l-6}" y="${Y(v)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${abrev(v)}</text>`;}
@@ -6796,6 +6874,12 @@ function invProvRender(c){const h=$('#inv-prov');if(!c.L.length){h.innerHTML=inv
   $$('#inv-prov tr.clk').forEach(tr=>tr.onclick=()=>analisar(tr.dataset.a));
   requestAnimationFrame(()=>{});}
 function graficoLinhas(host,labels,series,fm,zero){
+  const N=labels.length;host._gl={labels,series,fm,zero};let A=0,B=N-1;
+  const ck=labels[0]+'|'+N+'|'+series.map(x=>x.n).join(',');if(host._gz&&host._gz.k===ck){A=host._gz.a;B=host._gz.b;}else host._gz=null;
+  const desenha=()=>graficoLinhasBase(host,labels.slice(A,B+1),series.map(x=>Object.assign({},x,{v:x.v?x.v.slice(A,B+1):x.v})),fm,zero);
+  desenha();if(N<12)return;
+  const z=zoomCtl(host,N,()=>[A,B],(a,b)=>{A=a;B=b;host._gz=(A>0||B<N-1)?{k:ck,a:A,b:B}:null;desenha();},cx=>{const r=host.getBoundingClientRect();return Math.max(0,Math.min(1,((cx-r.left)/r.width*1000-84)/(1000-84-14)));});z.mostra();}
+function graficoLinhasBase(host,labels,series,fm,zero){
   fm=fm||(v=>fmt(v,2,'%'));const W=1000,H=330,p={l:84,r:14,t:12,b:26};
   const vals=series.filter(s=>s.v).flatMap(s=>s.v.filter(v=>v!=null&&isFinite(v)));if(!vals.length||labels.length<2){host.innerHTML='<p class="sub">Sem dados suficientes para o gráfico.</p>';return;}
   let mn=Math.min(...vals),mx=Math.max(...vals);if(zero!==false){mn=Math.min(mn,0);mx=Math.max(mx,0);}const sp=(mx-mn)||Math.abs(mx)*.1||1;mn-=sp*.05;mx+=sp*.05;
@@ -7274,35 +7358,56 @@ function gpCalc(D){const n=D.c.length,c=D.c;
   const e12=ema(c,12),e26=ema(c,26),macd=c.map((_,i)=>e12[i]!=null&&e26[i]!=null?e12[i]-e26[i]:null),sig=ema(macd,9),hist=macd.map((v,i)=>v!=null&&sig[i]!=null?v-sig[i]:null);
   return {mm20,mm50,mm200,bbU,bbL,rsi,macd,sig,hist};}
 const FMTP0=v=>fmtP(v);
-function grafPro(cv,j,op){const D=gpPrep(j),N=D.c.length,I=gpCalc(D);let hov=-1;const fmtP=v=>(op.fmt||FMTP0)(v);
-  function draw(){const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!N)return;
+/* zoom dos gráficos: rodinha do mouse (no ponto do cursor), arrastar para os lados, dois dedos no celular, duplo clique volta ao normal */
+function zoomCtl(el,N,ler,aplicar,frac){let ps=new Map(),ini=null,arr=false;const MIN=Math.min(N,8);
+  if(el._zab)el._zab.abort();const ab=new AbortController(),sg={signal:ab.signal};el._zab=ab;
+  const lim=(a,b)=>{let w=b-a;if(w<MIN-1)w=MIN-1;if(w>N-1)w=N-1;a=Math.round(a);if(a<0)a=0;if(a+w>N-1)a=N-1-w;return [a,a+Math.round(w)];};
+  const zoom=(f,fx)=>{const [a,b]=ler(),w=b-a,nw=Math.max(MIN-1,Math.min(N-1,w*f)),c=a+w*fx;const [x,y]=lim(c-nw*fx,c-nw*fx+nw);aplicar(x,y);mostra();};
+  const bt=el._zbt||(el._zbt=document.createElement('button'));bt.type='button';bt.className='chip zoom-reset';bt.textContent='Tirar zoom';bt.style.display='none';
+  bt.onclick=()=>{aplicar(0,N-1);mostra();};
+  const mostra=()=>{const [a,b]=ler();const z=a>0||b<N-1;if(z&&!bt.isConnected&&el.parentNode){el.parentNode.style.position='relative';el.parentNode.appendChild(bt);}bt.style.display=z?'':'none';if(z){bt.style.top=(el.offsetTop+6)+'px';bt.style.right='76px';}};
+  el.style.touchAction='pan-y';
+  el.addEventListener('wheel',e=>{if(N<MIN+2)return;e.preventDefault();zoom(e.deltaY>0?1.18:1/1.18,frac(e.clientX));},{passive:false,signal:ab.signal});
+  el.addEventListener('dblclick',()=>{aplicar(0,N-1);mostra();},sg);
+  el.addEventListener('pointerdown',e=>{ps.set(e.pointerId,e.clientX);const [a,b]=ler();
+    if(ps.size===2){const xs=[...ps.values()];ini={d:Math.abs(xs[0]-xs[1])||1,a,b,fx:frac((xs[0]+xs[1])/2)};}
+    else ini={x:e.clientX,a,b};arr=false;try{el.setPointerCapture(e.pointerId);}catch(_){} },sg);
+  el.addEventListener('pointermove',e=>{if(!ps.has(e.pointerId)||!ini)return;ps.set(e.pointerId,e.clientX);
+    if(ps.size>=2&&ini.d){const xs=[...ps.values()],d=Math.abs(xs[0]-xs[1])||1,w=(ini.b-ini.a)*ini.d/d,c=ini.a+(ini.b-ini.a)*ini.fx;const [x,y]=lim(c-w*ini.fx,c-w*ini.fx+w);aplicar(x,y);mostra();e.preventDefault();return;}
+    if(ps.size===1&&ini.x!=null){const r=el.getBoundingClientRect(),dx=e.clientX-ini.x;if(Math.abs(dx)>4)arr=true;if(!arr)return;
+      const sh=-dx/Math.max(1,r.width-72)*(ini.b-ini.a+1);const [x,y]=lim(ini.a+sh,ini.b+sh);aplicar(x,y);mostra();}},sg);
+  const fim=e=>{ps.delete(e.pointerId);if(ps.size===1){const [a,b]=ler(),x=[...ps.values()][0];ini={x,a,b};}else if(!ps.size){ini=null;setTimeout(()=>arr=false,0);}};
+  el.addEventListener('pointerup',fim,sg);el.addEventListener('pointercancel',fim,sg);
+  return {arrastando:()=>arr,mostra};}
+function grafPro(cv,j,op){const D=gpPrep(j),N=D.c.length,I=gpCalc(D);let hov=-1,A=0,B=N-1;const fmtP=v=>(op.fmt||FMTP0)(v);
+  function draw(){if(hov>=0&&(hov<A||hov>B))hov=-1;const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!N)return;
     cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
     const S=getComputedStyle(document.documentElement),V=k=>S.getPropertyValue(k).trim(),up=V('--good'),dn=V('--bad'),acc=V('--accent'),mut=V('--muted'),ln=V('--line'),tx=V('--text'),cd=V('--card2'),wr=V('--warn'),a2=V('--accent2');
     const painel=op.painel==='rsi'||op.painel==='macd',pad={l:6,r:66,t:8,b:22},gap=painel?12:0,hInd=painel?Math.round((h-pad.t-pad.b)*.24):0,hMain=h-pad.t-pad.b-hInd-gap;
-    const x0=pad.l,x1=w-pad.r,bw=(x1-x0)/N,X=i=>x0+bw*(i+.5),velas=op.tipo!=='linha';
+    const x0=pad.l,x1=w-pad.r,bw=(x1-x0)/(B-A+1),X=i=>x0+bw*(i-A+.5),velas=op.tipo!=='linha';
     let mn=Infinity,mx=-Infinity;
-    for(let i=0;i<N;i++){const lo=velas?D.l[i]:D.c[i],hi=velas?D.h[i]:D.c[i];if(lo<mn)mn=lo;if(hi>mx)mx=hi;
+    for(let i=A;i<=B;i++){const lo=velas?D.l[i]:D.c[i],hi=velas?D.h[i]:D.c[i];if(lo<mn)mn=lo;if(hi>mx)mx=hi;
       if(op.bb&&I.bbU[i]!=null){mn=Math.min(mn,I.bbL[i]);mx=Math.max(mx,I.bbU[i]);}
       ['mm20','mm50','mm200'].forEach(k=>{if(op[k]&&I[k][i]!=null){mn=Math.min(mn,I[k][i]);mx=Math.max(mx,I[k][i]);}});}
     const sp=(mx-mn)||Math.abs(mx)*.02||1;mn-=sp*.07;mx+=sp*.07;const Y=v=>pad.t+hMain*(1-(v-mn)/(mx-mn)),F='Inter,"Segoe UI",system-ui,sans-serif';
     g.font='11px '+F;g.lineWidth=1;
     for(let i=0;i<=5;i++){const v=mn+(mx-mn)*i/5,y=Math.round(Y(v))+.5;g.strokeStyle=ln;g.beginPath();g.moveTo(x0,y);g.lineTo(x1,y);g.stroke();g.fillStyle=mut;g.textAlign='left';g.fillText(fmtP(v),x1+6,y+4);}
-    if(op.vol){const vmax=Math.max(...D.v);if(vmax>0){const vh=hMain*.2;g.globalAlpha=.25;for(let i=0;i<N;i++){if(!D.v[i])continue;const hh=D.v[i]/vmax*vh;g.fillStyle=D.c[i]>=(i?D.c[i-1]:D.o[i])?up:dn;g.fillRect(X(i)-Math.max(bw*.35,.5),pad.t+hMain-hh,Math.max(bw*.7,1),hh);}g.globalAlpha=1;}}
-    if(op.bb){g.beginPath();let s=false;for(let i=0;i<N;i++){if(I.bbU[i]==null)continue;s?g.lineTo(X(i),Y(I.bbU[i])):g.moveTo(X(i),Y(I.bbU[i]));s=true;}for(let i=N-1;i>=0;i--){if(I.bbL[i]!=null)g.lineTo(X(i),Y(I.bbL[i]));}g.closePath();g.fillStyle=a2;g.globalAlpha=.09;g.fill();g.globalAlpha=.6;g.strokeStyle=a2;g.stroke();g.globalAlpha=1;}
-    if(velas){const cw=Math.max(1,Math.min(bw*.7,16));for(let i=0;i<N;i++){const o=D.o[i],c=D.c[i],cor=c>=o?up:dn;g.strokeStyle=cor;g.fillStyle=cor;g.beginPath();g.moveTo(Math.round(X(i))+.5,Y(D.h[i]));g.lineTo(Math.round(X(i))+.5,Y(D.l[i]));g.stroke();const yt=Y(Math.max(o,c)),yb=Y(Math.min(o,c));g.fillRect(X(i)-cw/2,yt,cw,Math.max(1,yb-yt));}}
-    else{const gr=g.createLinearGradient(0,pad.t,0,pad.t+hMain);gr.addColorStop(0,acc+'44');gr.addColorStop(1,acc+'00');g.beginPath();for(let i=0;i<N;i++)i?g.lineTo(X(i),Y(D.c[i])):g.moveTo(X(i),Y(D.c[i]));g.lineTo(X(N-1),pad.t+hMain);g.lineTo(X(0),pad.t+hMain);g.closePath();g.fillStyle=gr;g.fill();
-      g.beginPath();for(let i=0;i<N;i++)i?g.lineTo(X(i),Y(D.c[i])):g.moveTo(X(i),Y(D.c[i]));g.strokeStyle=acc;g.lineWidth=2;g.lineJoin='round';g.stroke();g.lineWidth=1;}
-    const linha=(a,cor)=>{g.beginPath();let s=false;for(let i=0;i<N;i++){if(a[i]==null)continue;s?g.lineTo(X(i),Y(a[i])):g.moveTo(X(i),Y(a[i]));s=true;}g.strokeStyle=cor;g.lineWidth=1.5;g.stroke();g.lineWidth=1;};
+    if(op.vol){const vmax=Math.max(...D.v.slice(A,B+1));if(vmax>0){const vh=hMain*.2;g.globalAlpha=.25;for(let i=A;i<=B;i++){if(!D.v[i])continue;const hh=D.v[i]/vmax*vh;g.fillStyle=D.c[i]>=(i?D.c[i-1]:D.o[i])?up:dn;g.fillRect(X(i)-Math.max(bw*.35,.5),pad.t+hMain-hh,Math.max(bw*.7,1),hh);}g.globalAlpha=1;}}
+    if(op.bb){g.beginPath();let s=false;for(let i=A;i<=B;i++){if(I.bbU[i]==null)continue;s?g.lineTo(X(i),Y(I.bbU[i])):g.moveTo(X(i),Y(I.bbU[i]));s=true;}for(let i=B;i>=A;i--){if(I.bbL[i]!=null)g.lineTo(X(i),Y(I.bbL[i]));}g.closePath();g.fillStyle=a2;g.globalAlpha=.09;g.fill();g.globalAlpha=.6;g.strokeStyle=a2;g.stroke();g.globalAlpha=1;}
+    if(velas){const cw=Math.max(1,Math.min(bw*.7,16));for(let i=A;i<=B;i++){const o=D.o[i],c=D.c[i],cor=c>=o?up:dn;g.strokeStyle=cor;g.fillStyle=cor;g.beginPath();g.moveTo(Math.round(X(i))+.5,Y(D.h[i]));g.lineTo(Math.round(X(i))+.5,Y(D.l[i]));g.stroke();const yt=Y(Math.max(o,c)),yb=Y(Math.min(o,c));g.fillRect(X(i)-cw/2,yt,cw,Math.max(1,yb-yt));}}
+    else{const gr=g.createLinearGradient(0,pad.t,0,pad.t+hMain);gr.addColorStop(0,acc+'44');gr.addColorStop(1,acc+'00');g.beginPath();for(let i=A;i<=B;i++)i>A?g.lineTo(X(i),Y(D.c[i])):g.moveTo(X(i),Y(D.c[i]));g.lineTo(X(B),pad.t+hMain);g.lineTo(X(A),pad.t+hMain);g.closePath();g.fillStyle=gr;g.fill();
+      g.beginPath();for(let i=A;i<=B;i++)i>A?g.lineTo(X(i),Y(D.c[i])):g.moveTo(X(i),Y(D.c[i]));g.strokeStyle=acc;g.lineWidth=2;g.lineJoin='round';g.stroke();g.lineWidth=1;}
+    const linha=(a,cor)=>{g.beginPath();let s=false;for(let i=A;i<=B;i++){if(a[i]==null)continue;s?g.lineTo(X(i),Y(a[i])):g.moveTo(X(i),Y(a[i]));s=true;}g.strokeStyle=cor;g.lineWidth=1.5;g.stroke();g.lineWidth=1;};
     if(op.mm20)linha(I.mm20,'#38bdf8');if(op.mm50)linha(I.mm50,wr);if(op.mm200)linha(I.mm200,'#f472b6');
-    const ul=D.c[N-1],yu=Y(ul);g.setLineDash([3,3]);g.strokeStyle=mut;g.globalAlpha=.7;g.beginPath();g.moveTo(x0,yu);g.lineTo(x1,yu);g.stroke();g.setLineDash([]);g.globalAlpha=1;
-    g.fillStyle=ul>=D.c[0]?up:dn;g.fillRect(x1+1,yu-9,pad.r-2,18);g.fillStyle='#08111c';g.font='600 11px '+F;g.textAlign='left';g.fillText(fmtP(ul),x1+6,yu+4);g.font='11px '+F;
-    const nl=Math.min(6,N);g.fillStyle=mut;for(let k=0;k<nl;k++){const i=Math.round((N-1)*k/Math.max(1,nl-1));g.textAlign=k===0?'left':k===nl-1?'right':'center';g.fillText(D.lb[i]||'',k===0?x0:k===nl-1?x1:X(i),h-6);}
+    const ul=D.c[B],yu=Y(ul);g.setLineDash([3,3]);g.strokeStyle=mut;g.globalAlpha=.7;g.beginPath();g.moveTo(x0,yu);g.lineTo(x1,yu);g.stroke();g.setLineDash([]);g.globalAlpha=1;
+    g.fillStyle=ul>=D.c[A]?up:dn;g.fillRect(x1+1,yu-9,pad.r-2,18);g.fillStyle='#08111c';g.font='600 11px '+F;g.textAlign='left';g.fillText(fmtP(ul),x1+6,yu+4);g.font='11px '+F;
+    const nl=Math.min(6,B-A+1);g.fillStyle=mut;for(let k=0;k<nl;k++){const i=A+Math.round((B-A)*k/Math.max(1,nl-1));g.textAlign=k===0?'left':k===nl-1?'right':'center';g.fillText(D.lb[i]||'',k===0?x0:k===nl-1?x1:X(i),h-6);}
     if(painel){const y0=pad.t+hMain+gap;g.strokeStyle=ln;g.strokeRect(x0+.5,y0+.5,x1-x0-1,hInd-1);
       if(op.painel==='rsi'){const Yr=v=>y0+hInd*(1-v/100);[30,70].forEach(v=>{g.setLineDash([3,3]);g.strokeStyle=v===70?dn:up;g.globalAlpha=.7;g.beginPath();g.moveTo(x0,Yr(v));g.lineTo(x1,Yr(v));g.stroke();g.globalAlpha=1;g.setLineDash([]);g.fillStyle=mut;g.textAlign='left';g.fillText(String(v),x1+6,Yr(v)+4);});
-        g.beginPath();let s=false;for(let i=0;i<N;i++){if(I.rsi[i]==null)continue;s?g.lineTo(X(i),Yr(I.rsi[i])):g.moveTo(X(i),Yr(I.rsi[i]));s=true;}g.strokeStyle=a2;g.lineWidth=1.5;g.stroke();g.lineWidth=1;g.fillStyle=mut;g.fillText('IFR (14)',x0+6,y0+13);}
-      else{const vs=I.macd.concat(I.sig,I.hist).filter(v=>v!=null),m=Math.max(...vs.map(Math.abs),1e-9),Ym=v=>y0+hInd/2-(v/m)*(hInd/2-4);g.globalAlpha=.5;
-        for(let i=0;i<N;i++){const v=I.hist[i];if(v==null)continue;g.fillStyle=v>=0?up:dn;g.fillRect(X(i)-Math.max(bw*.3,.5),Math.min(Ym(0),Ym(v)),Math.max(bw*.6,1),Math.abs(Ym(v)-Ym(0)));}g.globalAlpha=1;
-        const li=(a,cor)=>{g.beginPath();let s=false;for(let i=0;i<N;i++){if(a[i]==null)continue;s?g.lineTo(X(i),Ym(a[i])):g.moveTo(X(i),Ym(a[i]));s=true;}g.strokeStyle=cor;g.lineWidth=1.4;g.stroke();g.lineWidth=1;};li(I.macd,acc);li(I.sig,wr);
+        g.beginPath();let s=false;for(let i=A;i<=B;i++){if(I.rsi[i]==null)continue;s?g.lineTo(X(i),Yr(I.rsi[i])):g.moveTo(X(i),Yr(I.rsi[i]));s=true;}g.strokeStyle=a2;g.lineWidth=1.5;g.stroke();g.lineWidth=1;g.fillStyle=mut;g.fillText('IFR (14)',x0+6,y0+13);}
+      else{const vs=I.macd.slice(A,B+1).concat(I.sig.slice(A,B+1),I.hist.slice(A,B+1)).filter(v=>v!=null),m=Math.max(...vs.map(Math.abs),1e-9),Ym=v=>y0+hInd/2-(v/m)*(hInd/2-4);g.globalAlpha=.5;
+        for(let i=A;i<=B;i++){const v=I.hist[i];if(v==null)continue;g.fillStyle=v>=0?up:dn;g.fillRect(X(i)-Math.max(bw*.3,.5),Math.min(Ym(0),Ym(v)),Math.max(bw*.6,1),Math.abs(Ym(v)-Ym(0)));}g.globalAlpha=1;
+        const li=(a,cor)=>{g.beginPath();let s=false;for(let i=A;i<=B;i++){if(a[i]==null)continue;s?g.lineTo(X(i),Ym(a[i])):g.moveTo(X(i),Ym(a[i]));s=true;}g.strokeStyle=cor;g.lineWidth=1.4;g.stroke();g.lineWidth=1;};li(I.macd,acc);li(I.sig,wr);
         g.fillStyle=mut;g.textAlign='left';g.fillText('MACD (12, 26, 9)',x0+6,y0+13);}}
     if(hov>=0){const x=X(hov),c=D.c[hov],ant=hov?D.c[hov-1]:D.o[hov],vr=ant?(c/ant-1)*100:0;g.strokeStyle=mut;g.setLineDash([3,3]);g.beginPath();g.moveTo(x,pad.t);g.lineTo(x,h-pad.b);g.stroke();g.setLineDash([]);
       const T=[D.lb2[hov]||D.lb[hov]||''];if(velas)T.push(`Abertura ${fmtP(D.o[hov])}   Máxima ${fmtP(D.h[hov])}`,`Mínima ${fmtP(D.l[hov])}   Fechamento ${fmtP(c)}`);else T.push((op.rotulo||'Preço')+' '+fmtP(c));
@@ -7311,22 +7416,29 @@ function grafPro(cv,j,op){const D=gpPrep(j),N=D.c.length,I=gpCalc(D);let hov=-1;
       g.font='12px '+F;const bwd=Math.max(...T.map(t=>g.measureText(t).width))+22,bh=T.length*17+12;let bx=x+14;if(bx+bwd>x1)bx=x-bwd-14;if(bx<x0)bx=x0;const by=pad.t+6;
       g.fillStyle=cd;g.strokeStyle=ln;g.beginPath();g.roundRect?g.roundRect(bx,by,bwd,bh,10):g.rect(bx,by,bwd,bh);g.fill();g.stroke();
       T.forEach((t,k)=>{g.fillStyle=k?tx:mut;g.textAlign='left';g.fillText(t,bx+11,by+19+k*17);});g.beginPath();g.arc(x,Y(c),4,0,7);g.fillStyle=acc;g.fill();}}
-  cv.onmousemove=e=>{const r=cv.getBoundingClientRect(),b=(r.width-6-66)/N;hov=Math.max(0,Math.min(N-1,Math.floor((e.clientX-r.left-6)/b)));draw();};
+  const idx=cx=>{const r=cv.getBoundingClientRect(),b=(r.width-6-66)/(B-A+1);return Math.max(A,Math.min(B,A+Math.floor((cx-r.left-6)/b)));};
+  const zk=[j.ticker||'',j.per||'',j.iv||'',op.rotulo||''].join('|');
+  if(cv._zv&&cv._zv.k===zk&&N>2){B=Math.max(1,N-1-Math.min(cv._zv.fd,N-2));A=Math.max(0,B-cv._zv.w);}else cv._zv=null;
+  const z=zoomCtl(cv,N,()=>[A,B],(a,b)=>{A=a;B=b;cv._zv=(A>0||B<N-1)?{k:zk,fd:N-1-B,w:B-A}:null;draw();},cx=>{const r=cv.getBoundingClientRect();return Math.max(0,Math.min(1,(cx-r.left-6)/(r.width-6-66)));});
+  cv.onmousemove=e=>{if(z.arrastando())return;hov=idx(e.clientX);draw();};
   cv.onmouseleave=()=>{hov=-1;draw();};
+  cv.onpointerdown=e=>{if(e.pointerType!=='mouse'){hov=idx(e.clientX);draw();}};z.mostra();
   return {draw,set(o){Object.assign(op,o);draw();}};}
 const GP_PER=[['1d','1D','no dia'],['5d','5D','em 5 dias'],['1mo','1M','no mês'],['6mo','6M','em 6 meses'],['1y','1A','em 12 meses'],['2y','2A','em 2 anos'],['5y','5A','em 5 anos'],['max','Máx','desde o início']];
 function gpTools(){const o=ANA.op;
-  $('#gp-tools').innerHTML=GP_PER.map(([k,n])=>`<button class="chip${ANA.per===k?' on':''}" type="button" data-p="${k}">${n}</button>`).join('')+'<span class="sep"></span>'+
+  $('#gp-tools').innerHTML=GP_PER.map(([k,n])=>`<button class="chip${ANA.per===k?' on':''}" type="button" data-p="${k}">${n}</button>`).join('')+ivChips(ANA.per,ANA.ivR||ANA.iv||IV_PAD[ANA.per])+'<span class="sep"></span>'+
    `<button class="chip${o.tipo!=='linha'?' on':''}" type="button" data-o="candle" data-tip="Candles: abertura, máxima, mínima e fechamento de cada período.">Candles</button><button class="chip${o.tipo==='linha'?' on':''}" type="button" data-o="linha">Linha</button><span class="sep"></span>`+
    [['mm20','MM20','Média móvel de 20 períodos (tendência de curto prazo).'],['mm50','MM50','Média móvel de 50 períodos.'],['mm200','MM200','Média móvel de 200 períodos (tendência de longo prazo).'],['bb','Bollinger','Bandas de Bollinger (20, 2): a faixa de oscilação normal do preço.'],['vol','Volume','Volume negociado em cada período.']].map(([k,n,t])=>`<button class="chip${o[k]?' on':''}" type="button" data-t="${k}" data-tip="${t}">${n}</button>`).join('')+'<span class="sep"></span>'+
    [['rsi','IFR','Índice de força relativa (14): acima de 70 pode indicar sobrecompra; abaixo de 30, sobrevenda.'],['macd','MACD','Convergência e divergência de médias móveis (12, 26, 9): sinais de mudança de tendência.'],['nenhum','Sem painel','Esconde o painel inferior.']].map(([k,n,t])=>`<button class="chip${o.painel===k?' on':''}" type="button" data-pn="${k}" data-tip="${t}">${n}</button>`).join('');
   $('#gp-tools').onclick=e=>{const b=e.target.closest('button');if(!b)return;
-    if(b.dataset.p){ANA.per=b.dataset.p;gpTools();gpCarrega();return;}
+    if(b.dataset.p){ANA.per=b.dataset.p;if(ANA.iv&&!IV_OK[ANA.iv].includes(ANA.per))ANA.iv='';ANA.ivR='';gpTools();gpCarrega();return;}
+    if(b.dataset.iv){ANA.iv=b.dataset.iv;ANA.per=ivPer(ANA.iv,ANA.per,GP_PER);ANA.ivR='';gpTools();gpCarrega();return;}
     if(b.dataset.o)o.tipo=b.dataset.o;else if(b.dataset.t)o[b.dataset.t]=!o[b.dataset.t];else if(b.dataset.pn)o.painel=b.dataset.pn;
     LS.s('gp_op',{tipo:o.tipo,mm20:o.mm20,mm50:o.mm50,mm200:o.mm200,bb:o.bb,vol:o.vol,painel:o.painel});gpTools();if(chart&&chart.set)chart.set(o);};}
-async function gpCarrega(){const cv=$('#cv');if(!cv||!ANA)return;const tk=ANA.d.ticker,per=ANA.per;
-  try{const j=await api('/api/ohlc?ticker='+encodeURIComponent(tk)+'&periodo='+per);if(!ANA||ANA.d.ticker!==tk||ANA.per!==per)return;
-    chart=grafPro(cv,j,ANA.op);chart.draw();const nm=(GP_PER.find(x=>x[0]===per)||[])[2]||'',e=$('#an-var');if(e)e.innerHTML=`${pctH(j.ret)} ${nm}${j.agreg?` · uma barra por ${j.agreg}`:''}`;}
+async function gpCarrega(){const cv=$('#cv');if(!cv||!ANA)return;const tk=ANA.d.ticker,per=ANA.per,iv=ANA.iv||'';
+  try{const j=await api('/api/ohlc?ticker='+encodeURIComponent(tk)+'&periodo='+per+(iv?'&intervalo='+iv:''));if(!ANA||ANA.d.ticker!==tk||ANA.per!==per||(ANA.iv||'')!==iv)return;
+    if(!iv&&j.iv&&ANA.ivR!==j.iv){ANA.ivR=j.iv;gpTools();}
+    chart=grafPro(cv,j,ANA.op);chart.draw();const nm=(GP_PER.find(x=>x[0]===per)||[])[2]||'',e=$('#an-var');if(e)e.innerHTML=`${pctH(j.ret)} ${nm}${j.agreg?` · uma vela por ${j.agreg}`:''}${ivIntra(j.iv)?' · atualiza a cada minuto':''}`;}
   catch(e){const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);const v=$('#an-var');if(v)v.innerHTML=`<span class="neg">${esc(e.message)}</span>`;}}
 async function provCarrega(sym){const h=$('#an-prov');if(!h)return;
   try{const j=await api('/api/proventos?ticker='+encodeURIComponent(sym));if(!$('#an-prov'))return;
@@ -7543,18 +7655,7 @@ setTimeout(()=>{try{if(localStorage.getItem('inv_tutorial'))return;const d=(wind
 
 /* ---------- aba Gráfico da carteira: Patrimônio, Comparar ativos e um gráfico por ativo (com as ferramentas da análise) ---------- */
 const GV_OP=()=>INV.gOp||(INV.gOp=Object.assign({tipo:'candle',mm20:false,mm50:true,mm200:false,bb:false,vol:true,painel:'rsi'},LS.g('gp_op',{})));
-const GV_PER_PAT=[['1mo','1M','no mês'],['6mo','6M','em 6 meses'],['1y','1A','em 12 meses'],['tudo','Tudo','desde o início']];
-function gvTools(host,pers,per,patr,aoPer,aoOp){const o=GV_OP();
-  const ind=[['mm20','MM20','Média móvel de 20 períodos (tendência de curto prazo).'],['mm50','MM50','Média móvel de 50 períodos.'],['mm200','MM200','Média móvel de 200 períodos (tendência de longo prazo).'],['bb','Bollinger','Bandas de Bollinger (20, 2): a faixa de oscilação normal.']].concat(patr?[]:[['vol','Volume','Volume negociado em cada período.']]);
-  host.innerHTML=pers.map(([k,n])=>`<button class="chip${per===k?' on':''}" type="button" data-p="${k}">${n}</button>`).join('')+'<span class="sep"></span>'+
-   `<button class="chip${o.tipo!=='linha'?' on':''}" type="button" data-o="candle" data-tip="Candles: abertura, máxima, mínima e fechamento de cada período.">Candles</button><button class="chip${o.tipo==='linha'?' on':''}" type="button" data-o="linha">Linha</button><span class="sep"></span>`+
-   ind.map(([k,n,t])=>`<button class="chip${o[k]?' on':''}" type="button" data-t="${k}" data-tip="${t}">${n}</button>`).join('')+
-   (patr?'':'<span class="sep"></span>'+[['rsi','IFR','Índice de força relativa (14): acima de 70 pode indicar sobrecompra; abaixo de 30, sobrevenda.'],['macd','MACD','Convergência e divergência de médias móveis (12, 26, 9).'],['nenhum','Sem painel','Esconde o painel inferior.']].map(([k,n,t])=>`<button class="chip${o.painel===k?' on':''}" type="button" data-pn="${k}" data-tip="${t}">${n}</button>`).join(''));
-  host.onclick=e=>{const b=e.target.closest('button');if(!b)return;
-    if(b.dataset.p){aoPer(b.dataset.p);return;}
-    if(b.dataset.o)o.tipo=b.dataset.o;else if(b.dataset.t)o[b.dataset.t]=!o[b.dataset.t];else if(b.dataset.pn)o.painel=b.dataset.pn;
-    LS.s('gp_op',{tipo:o.tipo,mm20:o.mm20,mm50:o.mm50,mm200:o.mm200,bb:o.bb,vol:o.vol,painel:o.painel});gvTools(host,pers,per,patr,aoPer,aoOp);aoOp();};}
-function gvOp(patr){const o=GV_OP();return patr?Object.assign({},o,{vol:false,painel:'nenhum',rotulo:'Patrimônio',fmt:v=>document.body.classList.contains('privado')?'•••':dinA(v,MOE.c)}):o;}
+function gvOp(patr){const o=GV_OP();return patr?Object.assign({},o,{vol:false,painel:'nenhum',rotulo:'Patrimônio',fmt:v=>document.body.classList.contains('privado')?'•••':moeSimb()+' '+(Math.abs(v)>=1e5?abrevN(v):fmt(v,2))}):o;}
 async function invGrafRender(c){const H=$('#inv-graf'),tks=c.linhas.map(l=>l.t),sim=simAtivo();
   if(!tks.length&&!sim){H.innerHTML=c.R.length?'<div class="card"><p class="sub">Você só tem renda fixa. O gráfico mostra ações, FIIs, ETFs, ativos do exterior e cripto.</p></div>':invVazio();INV.gKey='';return;}
   let vis=INV.gVis||'pat';if(vis!=='pat'&&vis!=='cmp'&&!tks.includes(vis))vis='pat';if(vis==='cmp'&&!tks.length)vis='pat';INV.gVis=vis;
@@ -7563,20 +7664,43 @@ async function invGrafRender(c){const H=$('#inv-graf'),tks=c.linhas.map(l=>l.t),
   $('#gv-tabs').innerHTML=tabs.map(([k,n],i)=>`<button type="button" class="chip${k===vis?' on':''}" data-gv="${esc(k)}">${i>1?`<i class="gv-dot" style="background:${CORES_L[(i-2)%CORES_L.length]}"></i>`:''}${esc(n)}</button>`).join('');
   $$('#gv-tabs [data-gv]').forEach(b=>b.onclick=()=>{INV.gVis=b.dataset.gv;INV.gKey='';invGrafRender(INV.calc||invCalc());});
   if(vis==='cmp')return invGrafCmp(c);if(vis==='pat')return invPatRender(c);return invAtivoGraf(vis,c);}
-async function invAtivoGraf(t,c){const h=$('#gv-corpo'),per=INV.gaPer||'1y',key='a|'+t+'|'+per;
-  if(INV.gKey===key&&h.querySelector('#gv-cv')&&Date.now()-(INV.gT||0)<300000)return;INV.gKey=key;INV.gT=Date.now();
+/* intervalo das velas: 1 minuto a 1 semana (o Yahoo limita o período em cada intervalo) */
+const IVS=[['1m','1 min'],['5m','5 min'],['15m','15 min'],['1h','1 hora'],['1d','1 dia'],['1wk','1 semana']];
+const IV_OK={'1m':['1d','5d'],'5m':['1d','5d','1mo'],'15m':['1d','5d','1mo'],'1h':['1d','5d','1mo','6mo','1y'],'1d':['5d','1mo','6mo','1y','2y','5y','max','tudo'],'1wk':['6mo','1y','2y','5y','max','tudo']};
+const ivIntra=iv=>!!iv&&/[mh]$/.test(iv);
+function ivChips(per,iv){return '<span class="sep"></span><span class="gp-rot">Velas de</span>'+IVS.map(([k,n])=>`<button class="chip${iv===k?' on':''}${IV_OK[k].includes(per)?'':' fora'}" type="button" data-iv="${k}" data-tip="${IV_OK[k].includes(per)?'Cada vela representa '+n+'.':'Neste intervalo o período muda para um que o Yahoo Finance oferece.'}">${n}</button>`).join('');}
+function ivPer(iv,per,pers){if(IV_OK[iv].includes(per))return per;const ok=pers.map(x=>x[0]).filter(x=>IV_OK[iv].includes(x));return ivIntra(iv)?ok[ok.length-1]:ok[0];}
+/* intervalo padrão de cada período (o mesmo do servidor) */
+const IV_PAD={'1d':'5m','5d':'30m','1mo':'1d','6mo':'1d','1y':'1d','2y':'1d','5y':'1d','max':'1wk','tudo':'1d'};
+function gvTools(host,pers,per,patr,aoPer,aoOp,iv,aoIv){const o=GV_OP();
+  const ind=[['mm20','MM20','Média móvel de 20 períodos (tendência de curto prazo).'],['mm50','MM50','Média móvel de 50 períodos.'],['mm200','MM200','Média móvel de 200 períodos (tendência de longo prazo).'],['bb','Bollinger','Bandas de Bollinger (20, 2): a faixa de oscilação normal.']].concat(patr?[]:[['vol','Volume','Volume negociado em cada período.']]);
+  host.innerHTML=pers.map(([k,n])=>`<button class="chip${per===k?' on':''}" type="button" data-p="${k}">${n}</button>`).join('')+ivChips(per,iv||IV_PAD[per])+'<span class="sep"></span>'+
+   `<button class="chip${o.tipo!=='linha'?' on':''}" type="button" data-o="candle" data-tip="Candles: abertura, máxima, mínima e fechamento de cada período.">Candles</button><button class="chip${o.tipo==='linha'?' on':''}" type="button" data-o="linha">Linha</button><span class="sep"></span>`+
+   ind.map(([k,n,t])=>`<button class="chip${o[k]?' on':''}" type="button" data-t="${k}" data-tip="${t}">${n}</button>`).join('')+
+   (patr?'':'<span class="sep"></span>'+[['rsi','IFR','Índice de força relativa (14): acima de 70 pode indicar sobrecompra; abaixo de 30, sobrevenda.'],['macd','MACD','Convergência e divergência de médias móveis (12, 26, 9).'],['nenhum','Sem painel','Esconde o painel inferior.']].map(([k,n,t])=>`<button class="chip${o.painel===k?' on':''}" type="button" data-pn="${k}" data-tip="${t}">${n}</button>`).join(''));
+  host.onclick=e=>{const b=e.target.closest('button');if(!b)return;
+    if(b.dataset.p){aoPer(b.dataset.p);return;}
+    if(b.dataset.iv){aoIv(b.dataset.iv,ivPer(b.dataset.iv,per,pers));return;}
+    if(b.dataset.o)o.tipo=b.dataset.o;else if(b.dataset.t)o[b.dataset.t]=!o[b.dataset.t];else if(b.dataset.pn)o.painel=b.dataset.pn;
+    LS.s('gp_op',{tipo:o.tipo,mm20:o.mm20,mm50:o.mm50,mm200:o.mm200,bb:o.bb,vol:o.vol,painel:o.painel});gvTools(host,pers,per,patr,aoPer,aoOp,iv,aoIv);aoOp();};}
+/* gráfico de um ativo da carteira */
+async function invAtivoGraf(t,c,soDados){const h=$('#gv-corpo'),per=INV.gaPer||'1y',iv=INV.gaIv||'',key='a|'+t+'|'+per+'|'+iv;
+  if(!soDados){if(INV.gKey===key&&h.querySelector('#gv-cv')&&Date.now()-(INV.gT||0)<300000)return;INV.gKey=key;INV.gT=Date.now();
   const l=c.linhas.find(x=>x.t===t)||{};
   h.innerHTML=`<div class="card"><div class="head" style="align-items:flex-start"><div><h2 style="margin:0">${esc(t)} <span class="tag">${esc(CATN[t]||l.cls||'')}</span></h2><div class="sub" id="gv-var" style="margin-top:4px"></div></div>
     <div style="text-align:right"><div class="sub">Você tem <b>${fmtQ(l.q)}</b> · ${moneyH(l.valor)}</div>${l.resp!=null?`<div class="sub">Resultado desde a compra ${pctH(l.resp,1)}</div>`:''}</div></div>
-    <div class="gp-tools mt" id="gv-tools"></div><canvas id="gv-cv" class="gp"></canvas>
+    <div class="gp-tools mt" id="gv-tools"></div><div id="gv-area"><canvas id="gv-cv" class="gp"></canvas></div>
     <div class="tb2" style="margin:12px 0 0"><button class="btn sm" type="button" id="gv-neg">Comprar / vender</button><button class="btn ghost sm" type="button" id="gv-an">Análise completa</button></div></div>`;
-  $('#gv-neg').onclick=()=>invNovo(null,{t});$('#gv-an').onclick=()=>analisar(t);
-  let ch=null;const cv=$('#gv-cv');
-  gvTools($('#gv-tools'),GP_PER,per,false,p=>{INV.gaPer=p;INV.gKey='';invAtivoGraf(t,INV.calc||invCalc());},()=>{if(ch)ch.set(gvOp(false));});
-  try{const j=await api('/api/ohlc?ticker='+encodeURIComponent(t)+'&periodo='+per);if(INV.gKey!==key)return;
-    ch=grafPro(cv,j,gvOp(false));ch.draw();const nm=(GP_PER.find(x=>x[0]===per)||[])[2]||'';$('#gv-var').innerHTML=`${pctH(j.ret)} ${nm}${j.agreg?` · uma barra por ${j.agreg}`:''}`;}
-  catch(e){if(INV.gKey===key){INV.gKey='';cv.replaceWith(Object.assign(document.createElement('div'),{innerHTML:errBox(e.message)}));}}}
-/* patrimônio total dia a dia: saldo disponível + valor dos investimentos (preços de fechamento) */
+  $('#gv-neg').onclick=()=>invNovo(null,{t});$('#gv-an').onclick=()=>analisar(t);INV.gCh=null;
+  gvTools($('#gv-tools'),GP_PER,per,false,p=>{INV.gaPer=p;if(INV.gaIv&&!IV_OK[INV.gaIv].includes(p))INV.gaIv='';INV.gKey='';invAtivoGraf(t,INV.calc||invCalc());},()=>{if(INV.gCh)INV.gCh.set(gvOp(false));},iv,(v,p)=>{INV.gaIv=v;INV.gaPer=p;INV.gKey='';invAtivoGraf(t,INV.calc||invCalc());});}
+  try{const j=await api('/api/ohlc?ticker='+encodeURIComponent(t)+'&periodo='+per+(iv?'&intervalo='+iv:''));if(INV.gKey!==key)return;
+    INV.gCh=grafPro($('#gv-cv'),j,gvOp(false));INV.gCh.draw();const nm=(GP_PER.find(x=>x[0]===per)||[])[2]||'';
+    $('#gv-var').innerHTML=`${pctH(j.ret)} ${nm}${j.agreg?` · uma vela por ${j.agreg}`:''}${ivIntra(j.iv)?' · atualiza a cada minuto':''}`;
+    if(!iv&&j.iv){const b=$('#gv-tools [data-iv="'+j.iv+'"]');if(b)b.classList.add('on');}}
+  catch(e){if(INV.gKey===key&&!soDados){INV.gKey='';$('#gv-area').innerHTML=errBox(e.message);}}}
+/* patrimônio total: dia a dia (fechamentos) ou vela a vela (minutos e horas) */
+const GV_PER_PAT=[['1d','1D','hoje'],['5d','5D','em 5 dias'],['1mo','1M','no mês'],['6mo','6M','em 6 meses'],['1y','1A','em 12 meses'],['tudo','Tudo','desde o início']];
+const PAT_IV_PAD={'1d':'5m','5d':'15m','1mo':'1d','6mo':'1d','1y':'1d','tudo':'1d'};
 function patSerie(c,rent){const sim=simAtivo(),M=sim?simMovs():[],hj=hojeISO(),dM=m=>isoDe(new Date(m.t||Date.now()));
   const movAte=d=>M.reduce((a,m)=>dM(m)<=d?a+(m.tipo==='saq'?-m.v:m.v):a,0);const P=[];
   if(rent&&rent.datas&&rent.datas.length){const d0=rent.datas[0];
@@ -7585,31 +7709,66 @@ function patSerie(c,rent){const sim=simAtivo(),M=sim?simMovs():[],hj=hojeISO(),d
   else if(sim)[...new Set(M.map(dM))].sort().forEach(d=>P.push([d,movAte(d)]));
   const agora=(c.pat||0)+(sim?(c.caixa||0):0);if(P.length&&P[P.length-1][0]===hj)P[P.length-1][1]=agora;else P.push([hj,agora]);
   return P;}
-async function invPatRender(c){const h=$('#gv-corpo'),per=INV.gpPer||'tudo',L=invLanc(),R=invRF(),sim=simAtivo(),sig=JSON.stringify([L,R]),key='p|'+per+'|'+sig+'|'+JSON.stringify(sim?simMovs():[]);
-  if(INV.gKey===key&&h.querySelector('#gv-cv')&&Date.now()-(INV.gT||0)<300000)return;INV.gKey=key;INV.gT=Date.now();
+/* patrimônio em cada vela intradiária: saldo + ativos (quantidade naquele momento × preço) + renda fixa */
+function patIntraSerie(c,j){const sim=simAtivo(),L=invLanc(),R=c.rfL||[],M=sim?simMovs():[],brt=ms=>new Date(ms-3*3600e3).toISOString().slice(0,16);
+  const ev=[];
+  M.forEach(m=>ev.push({k:brt(m.t||0),cx:m.tipo==='saq'?-m.v:m.v}));
+  L.forEach(l=>{const k=l.h?brt(Date.parse(l.h)):l.d+'T10:00',v=l.q*l.p;ev.push({k,t:l.t,q:l.tipo==='V'?-l.q:l.q,p:l.p,cx:l.tipo==='V'?v-(l.tx||0):-(v+(l.tx||0))});});
+  R.forEach(x=>{ev.push({k:x.d+'T00:00',cx:-x.v});if(x.resg)ev.push({k:x.resg+'T00:00',cx:x.vresg||0});});
+  (c.prov||[]).forEach(p=>ev.push({k:p.d+'T00:00',cx:p.total}));
+  ev.sort((a,b)=>a.k<b.k?-1:a.k>b.k?1:0);
+  const agoraK=brt(Date.now()),rfV=k=>R.reduce((a,x)=>{const d0=x.d+'T00:00';if(k<d0)return a;if(x.resg&&k>=x.resg+'T00:00')return a;
+    const vf=x.resg?(x.vresg||x.v):(x.bruto!=null?x.bruto:x.v),fim=x.resg?x.resg+'T00:00':agoraK,t0=Date.parse(d0+'Z'),t1=Date.parse(fim+'Z'),tk=Date.parse(k+'Z');
+    return a+x.v+(vf-x.v)*(t1>t0?Math.min(1,Math.max(0,(tk-t0)/(t1-t0))):1);},0);
+  const q={},ult={};let cx=0,e=0;const P=[];
+  j.t.forEach((k,i)=>{while(e<ev.length&&ev[e].k<=k){const x=ev[e++];cx+=x.cx||0;if(x.t){q[x.t]=(q[x.t]||0)+x.q;ult[x.t]=x.p;}}
+    let pos=0;Object.keys(q).forEach(t=>{if(q[t]<=1e-9)return;const s=j.s[t],v=s&&s[i]!=null?s[i]:ult[t];pos+=q[t]*(v||0);});
+    P.push([k,(sim?cx:0)+pos+rfV(k)]);});
+  return P;}
+async function invPatRender(c,soDados){const h=$('#gv-corpo'),per=INV.gpPer||'tudo',iv=INV.gpIv&&(IV_OK[INV.gpIv]||[]).includes(per)?INV.gpIv:PAT_IV_PAD[per],intra=ivIntra(iv),
+  L=invLanc(),R=invRF(),sim=simAtivo(),sig=JSON.stringify([L,R]),key='p|'+per+'|'+iv+'|'+sig+'|'+JSON.stringify(sim?simMovs():[]);
+  if(!soDados){if(INV.gKey===key&&h.querySelector('#gv-cv')&&Date.now()-(INV.gT||0)<300000)return;INV.gKey=key;INV.gT=Date.now();
   const tot=(c.pat||0)+(sim?(c.caixa||0):0);
   h.innerHTML=`<div class="card"><div class="head" style="align-items:flex-start"><div><div class="eyebrow">Seu patrimônio</div><div class="price money" style="font-size:30px;margin-top:2px">${moneyH(tot)}</div><div class="sub" id="gv-var"></div></div>
     <div style="text-align:right" class="sub">${sim?`Saldo disponível ${moneyH(c.caixa||0)}<br>`:''}Investido ${moneyH(c.pat||0)}</div></div>
     <div class="gp-tools mt" id="gv-tools"></div><div id="gv-area"><canvas id="gv-cv" class="gp"></canvas></div>
-    <p class="sub" style="font-size:12px;margin-top:8px">${sim?'Soma do saldo disponível com o valor dos seus investimentos em cada dia':'Valor dos seus investimentos em cada dia'}, com os preços de fechamento. Depósitos e saques também mudam o patrimônio. Cada vela mostra de quanto a quanto ele foi no período.</p></div>`;
-  let ch=null;
-  gvTools($('#gv-tools'),GV_PER_PAT,per,true,p=>{INV.gpPer=p;INV.gKey='';invPatRender(INV.calc||invCalc());},()=>{INV.gKey='';invPatRender(INV.calc||invCalc());});
-  let rent=null;
-  if(L.length||R.length){if(INV.rent&&INV.rentSig===sig)rent=INV.rent;else{try{const j=await apiPost('/api/carteira/rent',{lanc:L,rf:R});if(!j.erro){rent=j;INV.rent=j;INV.rentSig=sig;}}catch(e){}}if(INV.gKey!==key)return;}
-  let P=patSerie(c,rent);
-  if(per!=='tudo'){const d=new Date();if(per==='1mo')d.setMonth(d.getMonth()-1);else if(per==='6mo')d.setMonth(d.getMonth()-6);else d.setFullYear(d.getFullYear()-1);const ls=isoDe(d);
-    const ant=P.filter(x=>x[0]<ls).pop();P=P.filter(x=>x[0]>=ls);if(ant)P.unshift([ls,ant[1]]);}
-  if(P.length<2){$('#gv-area').innerHTML='<p class="sub" style="padding:30px 0;text-align:center">O gráfico do patrimônio aparece a partir do segundo dia de uso. Faça compras e volte amanhã para ver a evolução.</p>';return;}
-  const cvt1=v=>{const x=brlDe(v);return x==null?v:x;},V=P.map(x=>cvt1(x[1]));
-  /* cada vela: de quanto a quanto o patrimônio foi no período (um dia ou, em períodos longos, uma semana) */
-  const semana=GV_OP().tipo!=='linha'&&P.length>70,G=[];
-  P.forEach((x,i)=>{const d=new Date(x[0]+'T12:00:00'),k=semana?isoDe(new Date(d.getTime()-((d.getDay()+6)%7)*86400000)):x[0],g=G[G.length-1],ant=i?V[i-1]:V[i];
+    <p class="sub" style="font-size:12px;margin-top:8px">${sim?'Soma do saldo disponível com o valor dos seus investimentos':'Valor dos seus investimentos'} em cada ${intra?'vela (preços do momento; a renda fixa rende aos poucos)':'dia (preços de fechamento)'}. Depósitos e saques também mudam o patrimônio. Cada vela mostra de quanto a quanto ele foi no período.</p></div>`;
+  gvTools($('#gv-tools'),GV_PER_PAT,per,true,p=>{INV.gpPer=p;INV.gKey='';invPatRender(INV.calc||invCalc());},()=>{INV.gKey='';invPatRender(INV.calc||invCalc());},iv,(v,p)=>{INV.gpIv=v;INV.gpPer=p;INV.gKey='';invPatRender(INV.calc||invCalc());});}
+  let P=[],semana=false;
+  if(intra){const tks=[...new Set(L.map(l=>l.t))];
+    if(tks.length){try{const j=await api('/api/carteira/intra?periodo='+per+'&intervalo='+iv+'&tickers='+encodeURIComponent(tks.join(',')));if(INV.gKey!==key)return;if(j.erro)throw new Error(j.erro);P=patIntraSerie(c,j);}
+      catch(e){if(INV.gKey===key&&!soDados)$('#gv-area').innerHTML=errBox(e.message);return;}}
+    else{const k=new Date(Date.now()-3*3600e3).toISOString().slice(0,16);P=[[k,(c.pat||0)+(sim?(c.caixa||0):0)]];}}
+  else{let rent=null;
+    if(L.length||R.length){if(INV.rent&&INV.rentSig===sig)rent=INV.rent;else{try{const j=await apiPost('/api/carteira/rent',{lanc:L,rf:R});if(!j.erro){rent=j;INV.rent=j;INV.rentSig=sig;}}catch(e){}}if(INV.gKey!==key)return;}
+    P=patSerie(c,rent);
+    if(per!=='tudo'){const d=new Date();if(per==='5d')d.setDate(d.getDate()-7);else if(per==='1mo')d.setMonth(d.getMonth()-1);else if(per==='6mo')d.setMonth(d.getMonth()-6);else d.setFullYear(d.getFullYear()-1);const ls=isoDe(d);
+      const ant=P.filter(x=>x[0]<ls).pop();P=P.filter(x=>x[0]>=ls);if(ant)P.unshift([ls,ant[1]]);}
+    semana=iv==='1wk'||(GV_OP().tipo!=='linha'&&P.length>70&&!INV.gpIv);}
+  if(P.length<2){$('#gv-area').innerHTML=`<p class="sub" style="padding:30px 0;text-align:center">${intra?'Ainda não há negociações neste período. Com a bolsa fechada, escolha 5D.':'O gráfico do patrimônio aparece a partir do segundo dia de uso. Faça compras e volte amanhã para ver a evolução.'}</p>`;return;}
+  if(!$('#gv-cv'))$('#gv-area').innerHTML='<canvas id="gv-cv" class="gp"></canvas>';
+  const cvt1=v=>{const x=brlDe(v);return x==null?v:x;},V=P.map(x=>cvt1(x[1])),G=[];
+  const rot=k=>k.length>10?(per==='1d'?k.slice(11,16):k.slice(8,10)+'/'+k.slice(5,7)+' '+k.slice(11,16)):dataBR(k).slice(0,5),rot2=k=>k.length>10?dataBR(k.slice(0,10))+' '+k.slice(11,16):dataBR(k);
+  P.forEach((x,i)=>{const d=new Date(x[0].slice(0,10)+'T12:00:00'),k=semana?isoDe(new Date(d.getTime()-((d.getDay()+6)%7)*86400000)):x[0],g=G[G.length-1],ant=i?V[i-1]:V[i];
     if(g&&g.k===k){g.c=V[i];g.h=Math.max(g.h,V[i]);g.l=Math.min(g.l,V[i]);g.d2=x[0];}else G.push({k,d:x[0],d2:x[0],o:ant,c:V[i],h:Math.max(ant,V[i]),l:Math.min(ant,V[i])});});
-  const j={c:G.map(g=>g.c),o:G.map(g=>g.o),h:G.map(g=>g.h),l:G.map(g=>g.l),v:G.map(()=>0),lb:G.map(g=>dataBR(g.d).slice(0,5)),lb2:G.map(g=>semana&&g.d2!==g.d?'Semana de '+dataBR(g.d)+' a '+dataBR(g.d2):dataBR(g.d))};
-  ch=grafPro($('#gv-cv'),j,gvOp(true));ch.draw();
-  const ini=V[0],fim=V[V.length-1],nm=(GV_PER_PAT.find(x=>x[0]===per)||[])[2]||'';
-  const dif=fim-ini;$('#gv-var').innerHTML=`<span class="money ${dif>=0?'pos':'neg'}">${dif>=0?'+':'−'}${esc(dinA(Math.abs(dif),MOE.c))}</span> ${nm}${sim?' (inclui depósitos e saques)':''}${semana?' · uma vela por semana':''}`;privAplica();}
+  const j={per:'pat'+per,iv,c:G.map(g=>g.c),o:G.map(g=>g.o),h:G.map(g=>g.h),l:G.map(g=>g.l),v:G.map(()=>0),lb:G.map(g=>rot(g.d)),lb2:G.map(g=>semana&&g.d2!==g.d?'Semana de '+dataBR(g.d)+' a '+dataBR(g.d2):rot2(g.d))};
+  INV.gCh=grafPro($('#gv-cv'),j,gvOp(true));INV.gCh.draw();
+  const ini=V[0],fim=V[V.length-1],nm=(GV_PER_PAT.find(x=>x[0]===per)||[])[2]||'',dif=fim-ini;
+  $('#gv-var').innerHTML=`<span class="money ${dif>=0?'pos':'neg'}">${dif>=0?'+':'−'}${esc(dinA(Math.abs(dif),MOE.c))}</span> ${nm}${sim?' (inclui depósitos e saques)':''}${semana?' · uma vela por semana':''}${intra?' · atualiza a cada minuto':''}`;privAplica();}
+/* gráficos de minutos e horas se atualizam sozinhos a cada minuto enquanto estão na tela */
+setInterval(()=>{if(document.visibilityState!=='visible')return;
+  try{if($('#v-invest').classList.contains('on')&&INV.tab==='graf'&&$('#gv-cv')){const c=INV.calc||invCalc();
+    if(INV.gVis==='pat'){const per=INV.gpPer||'tudo',iv=INV.gpIv&&(IV_OK[INV.gpIv]||[]).includes(per)?INV.gpIv:PAT_IV_PAD[per];if(ivIntra(iv))invPatRender(c,true);}
+    else if(INV.gVis&&INV.gVis!=='cmp'){const per=INV.gaPer||'1y',iv=INV.gaIv||IV_PAD[per];if(ivIntra(iv))invAtivoGraf(INV.gVis,c,true);}}}catch(e){}
+  try{if(ANA&&$('#v-analisar').classList.contains('on')&&$('#cv')&&ivIntra(ANA.iv||IV_PAD[ANA.per]))gpCarrega();}catch(e){}},60000);
 window.addEventListener('resize',()=>{if(INV.tab==='graf'&&INV.gVis!=='cmp'){INV.gKey='';const c=INV.calc;if(c&&$('#v-invest').classList.contains('on'))invGrafRender(c);}});
+
+/* zoom também nos gráficos de linhas do simulador, comparar e plano */
+function svgChart(host,labels,series,fm,zoom){fm=fm||brl;
+  const N=labels.length;let A=0,B=N-1;const ck=labels[0]+'|'+N+'|'+series.map(x=>x.n).join(',');if(host._gz&&host._gz.k===ck){A=host._gz.a;B=host._gz.b;}else host._gz=null;
+  const desenha=()=>svgChartBase(host,labels.slice(A,B+1),series.map(x=>Object.assign({},x,{v:x.v.slice(A,B+1)})),fm,zoom);
+  desenha();if(N<12)return;
+  const z=zoomCtl(host,N,()=>[A,B],(a,b)=>{A=a;B=b;host._gz=(A>0||B<N-1)?{k:ck,a:A,b:B}:null;desenha();},cx=>{const r=host.getBoundingClientRect();return Math.max(0,Math.min(1,((cx-r.left)/r.width*700-64)/(700-64-12)));});z.mostra();}
 
 </script>
 </body>
