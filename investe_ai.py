@@ -1683,7 +1683,7 @@ def conta_estado():
         gu = u.get("google") or {}
         out["usuario"] = {"nome": u.get("nome"), "email": u.get("email"), "tem_senha": bool(u.get("hash")),
                           "google": bool(gu.get("sub")), "drive": bool(gu.get("drive") and gu.get("refresh")),
-                          "foto": gu.get("foto"), "ultimo_sync": gu.get("ultimo_sync"), "erro_sync": gu.get("erro_sync"), "puxar": bool(gu.get("drive") and gu.get("puxado") is False)}
+                          "foto": gu.get("foto"), "ultimo_sync": gu.get("ultimo_sync"), "erro_sync": gu.get("erro_sync") or (None if gu.get("drive") or not gu.get("sub") else "O Google não deu permissão ao Drive, então os dados não vão para seus outros aparelhos. Saia e entre com o Google de novo, marcando a opção do Google Drive.")}
     return out
 
 def api_registrar(d):
@@ -1758,8 +1758,14 @@ def api_dados_salvar(d):
     if not isinstance(dados, dict): return {"erro": "Dados inválidos."}
     limpos = {k: v for k, v in dados.items() if k in CHAVES_SYNC}
     if len(json.dumps(limpos, ensure_ascii=False)) > 3_000_000: return {"erro": "Dados grandes demais para salvar."}
-    ts = time.time()
-    with _trava: _gravar_json(_dados_path(uid), {"atualizado": ts, "dados": limpos})
+    with _trava:
+        L = dados_ler(uid)
+        if L.get("dados") == limpos:  # nada mudou: não marca como alterado (não atropela outro aparelho)
+            return {"ok": True, "atualizado": L.get("atualizado", 0), "conta": uid != "local"}
+        ts = time.time()
+        novo = {"atualizado": ts, "dados": limpos, "sujo": True}
+        if "base" in L: novo["base"] = L["base"]
+        _gravar_json(_dados_path(uid), novo)
     if uid != "local":
         _drive_agendar(uid)
     return {"ok": True, "atualizado": ts, "conta": uid != "local"}
@@ -1868,7 +1874,7 @@ def g_callback(q):
             gu.update({"sub": sub, "email": email, "foto": ui.get("picture"), "access": j["access_token"],
                        "exp": time.time() + int(j.get("expires_in", 3600)), "drive": "drive.appdata" in (j.get("scope") or "")})
             if j.get("refresh_token"): gu["refresh"] = j["refresh_token"]
-            gu["puxado"] = False  # até trazer os dados do Drive, este aparelho não envia nada
+            gu["puxado"] = False  # aparelho que acabou de entrar: primeiro traz os dados da nuvem
             usuarios_salvar(U)
             c = cfg(); c["sessao"] = alvo["id"]; cfg_salvar(c)
         if ANDROID: return _pag("Conta Google conectada!", True) + "<script>setTimeout(function(){location.href='/'},1200)</script>"
@@ -1904,20 +1910,47 @@ def _marca_sync(uid, erro=None):
         if u and u.get("google"):
             u["google"]["ultimo_sync"] = time.time(); u["google"]["erro_sync"] = erro; usuarios_salvar(U)
 
+def _drive_erro(r):
+    """Transforma a recusa do Google numa mensagem que a pessoa entende (e registra o motivo técnico)."""
+    raz = ""
+    try:
+        e = r.json().get("error") or {}
+        raz = " ".join(str(x.get("reason", "")) for x in (e.get("errors") or [])) + " " + str(e.get("status", "")) + " " + str(e.get("message", ""))
+    except Exception:
+        try: raz = r.text[:300]
+        except Exception: pass
+    log(f"Drive {r.status_code}: {raz.strip()[:400]}")
+    b = raz.lower()
+    if r.status_code == 401:
+        return RuntimeError("O Google pediu para entrar de novo. Saia da conta e entre com o Google outra vez.")
+    if r.status_code == 403:
+        if "accessnotconfigured" in b or "service_disabled" in b or "has not been used" in b or "is disabled" in b:
+            return RuntimeError("A API do Google Drive está desativada no projeto do Google Cloud do Investe.AI.")
+        if "insufficient" in b or "scope" in b:
+            return RuntimeError("O Google não deu permissão ao Drive. Saia e entre com o Google de novo, marcando a opção do Google Drive.")
+        if "domain" in b or "admin" in b or "policy" in b:
+            return RuntimeError("Esta conta Google (de escola ou empresa) não permite que apps usem o Google Drive. Use uma conta Google pessoal.")
+        return RuntimeError("O Google Drive recusou o acesso (403). " + raz.strip()[:120])
+    return RuntimeError("Google Drive respondeu com erro " + str(r.status_code) + ".")
+
+
+def _drive_tok(u):
+    tok = _g_token(u)
+    if not tok: raise RuntimeError("Sem permissão do Google. Saia e entre com o Google de novo.")
+    return tok
+
+
 def _drive_achar(tok):
     r = requests.get("https://www.googleapis.com/drive/v3/files", headers={"Authorization": "Bearer " + tok}, timeout=20,
                      params={"spaces": "appDataFolder", "q": f"name='{DRIVE_ARQ}'", "fields": "files(id)"})
-    if r.status_code >= 400: raise RuntimeError("Drive " + str(r.status_code))
+    if r.status_code >= 400: raise _drive_erro(r)
     f = r.json().get("files", [])
     return f[0]["id"] if f else None
 
-def drive_push(uid):
-    u = usuarios()["usuarios"].get(uid)
-    if not (u and (u.get("google") or {}).get("drive")): return False
-    if u["google"].get("puxado") is False: return False  # ainda não trouxe os dados da nuvem neste aparelho
-    tok = _g_token(u)
-    if not tok: raise RuntimeError("Sem permissão do Google. Vincule a conta de novo.")
-    corpo = json.dumps(dados_ler(uid), ensure_ascii=False).encode("utf-8")
+
+def _drive_enviar(u, conteudo):
+    tok = _drive_tok(u)
+    corpo = json.dumps(conteudo, ensure_ascii=False).encode("utf-8")
     H = {"Authorization": "Bearer " + tok}
     fid = _drive_achar(tok)
     if fid:
@@ -1929,63 +1962,86 @@ def drive_push(uid):
         body = (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{b}\r\nContent-Type: application/json\r\n\r\n").encode() + corpo + f"\r\n--{b}--".encode()
         r = requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
                           headers={**H, "Content-Type": f"multipart/related; boundary={b}"}, data=body, timeout=30)
-    if r.status_code >= 400: raise RuntimeError("Drive " + str(r.status_code))
-    _marca_sync(uid)
-    return True
+    if r.status_code >= 400: raise _drive_erro(r)
+
 
 def drive_pull(uid):
     u = usuarios()["usuarios"].get(uid)
     if not (u and (u.get("google") or {}).get("drive")): return None
-    tok = _g_token(u)
-    if not tok: raise RuntimeError("Sem permissão do Google. Vincule a conta de novo.")
+    tok = _drive_tok(u)
     fid = _drive_achar(tok)
     if not fid: return None
     r = requests.get(f"https://www.googleapis.com/drive/v3/files/{fid}?alt=media", headers={"Authorization": "Bearer " + tok}, timeout=30)
-    if r.status_code >= 400: raise RuntimeError("Drive " + str(r.status_code))
+    if r.status_code >= 400: raise _drive_erro(r)
     j = r.json()
     return j if isinstance(j, dict) and isinstance(j.get("dados"), dict) else None
 
-def _drive_push_bg(uid):
-    try: drive_push(uid)
-    except Exception as e:
-        log("drive push: " + str(e)); _marca_sync(uid, str(e)[:120])
 
-def _sync_migrar():
-    # contas Google vinculadas antes da 3.8: o computador reenvia os dados dele ao Drive; o celular traz da nuvem
-    try:
-        with _trava:
-            U = usuarios(); mudou = []
-            for x in U["usuarios"].values():
-                gu = x.get("google") or {}
-                if gu.get("drive") and "puxado" not in gu:
-                    gu["puxado"] = not ANDROID; mudou.append(x["id"])
-            if mudou: usuarios_salvar(U)
-        if not ANDROID:
-            for uid in mudou: _drive_agendar(uid)
-    except Exception:
-        log("sync migrar:\n" + traceback.format_exc())
-_sync_migrar()
+_sync_travas = {}
+
+
+def sincronizar_conta(uid, so_enviar=False):
+    """Sincronização de mão dupla com o Google Drive (pasta oculta do app).
+
+    O arquivo local guarda "base" (a versão da nuvem que este aparelho conhece) e "sujo" (mudou aqui desde então).
+    - mudou só na nuvem: traz para cá;  - mudou só aqui: envia;  - mudou nos dois: fica a mudança mais recente.
+    - aparelho que acabou de entrar na conta (sem "base"): traz da nuvem, se houver algo lá.
+    Devolve "puxou", "enviou" ou None."""
+    u = usuarios()["usuarios"].get(uid)
+    gu = (u or {}).get("google") or {}
+    if not gu.get("drive"): return None
+    trava = _sync_travas.setdefault(uid, threading.Lock())
+    with trava:
+        L = dados_ler(uid)
+        rem = drive_pull(uid)
+        rts = rem.get("atualizado", 0) if rem else None
+        primeiro = "base" not in L or gu.get("puxado") is False
+        mudou_fora = rem is not None and (primeiro or rts != L.get("base"))
+        sujo = bool(L.get("sujo")) and not primeiro
+        acao = None
+        if mudou_fora and (not sujo or (rts or 0) > L.get("atualizado", 0)):
+            if so_enviar: return None  # a tela traz a versão da nuvem na próxima sincronização
+            with _trava:
+                if dados_ler(uid).get("atualizado") != L.get("atualizado"): return None  # mudou agora mesmo: fica para a próxima
+                _gravar_json(_dados_path(uid), {"atualizado": rts, "dados": {k: v for k, v in rem["dados"].items() if k in CHAVES_SYNC},
+                                                "base": rts, "sujo": False})
+            acao = "puxou"
+        elif sujo or (rem is None and L.get("dados")):
+            ts = L.get("atualizado") or time.time()
+            _drive_enviar(u, {"atualizado": ts, "dados": L.get("dados", {})})
+            with _trava:
+                atual = dados_ler(uid)
+                atual["base"] = ts
+                if atual.get("atualizado") == L.get("atualizado"): atual["sujo"] = False
+                _gravar_json(_dados_path(uid), atual)
+            acao = "enviou"
+        elif primeiro and rem is None:
+            with _trava:
+                atual = dados_ler(uid); atual["base"] = None; _gravar_json(_dados_path(uid), atual)
+        if gu.get("puxado") is False:
+            with _trava:
+                U = usuarios(); U["usuarios"][uid]["google"]["puxado"] = True; usuarios_salvar(U)
+    _marca_sync(uid)
+    return acao
+
+
+def _drive_push_bg(uid):
+    try: sincronizar_conta(uid, so_enviar=True)
+    except Exception as e:
+        log("sincronizar (envio): " + str(e)); _marca_sync(uid, str(e)[:200])
+
 
 def api_sincronizar():
     u = usuario_atual()
     if not u: return {"erro": "Entre na sua conta."}
-    local = dados_ler(u["id"]); aviso = None
+    aviso = None; acao = None
     try:
-        rem = drive_pull(u["id"])
-        primeiro = (u.get("google") or {}).get("puxado") is False
-        if primeiro:
-            with _trava:
-                U = usuarios(); U["usuarios"][u["id"]]["google"]["puxado"] = True; usuarios_salvar(U)
-        if rem and rem.get("dados") and (primeiro or rem.get("atualizado", 0) > local.get("atualizado", 0)):
-            with _trava: _gravar_json(_dados_path(u["id"]), {"atualizado": rem["atualizado"], "dados": {k: v for k, v in rem["dados"].items() if k in CHAVES_SYNC}})
-            local = dados_ler(u["id"])
-        elif local.get("dados"):
-            drive_push(u["id"])
-        if (u.get("google") or {}).get("drive"): _marca_sync(u["id"])
+        acao = sincronizar_conta(u["id"])
     except Exception as e:
-        log("sincronizar: " + str(e)); aviso = "Não consegui sincronizar com o Google Drive agora; os dados continuam salvos neste computador."
-        _marca_sync(u["id"], str(e)[:120])
-    return {"dados": local.get("dados", {}), "atualizado": local.get("atualizado", 0), "aviso": aviso}
+        log("sincronizar: " + str(e)); _marca_sync(u["id"], str(e)[:200])
+        aviso = (str(e) if isinstance(e, RuntimeError) else "Não consegui falar com o Google Drive agora.") + " Os dados continuam salvos neste aparelho."
+    L = dados_ler(u["id"])
+    return {"dados": L.get("dados", {}), "atualizado": L.get("atualizado", 0), "puxou": acao == "puxou", "aviso": aviso}
 
 # ---- Inteligência artificial: Groq embutido como padrão, Gemini embutido como reserva e para a pesquisa no Google
 # (também aceita chave própria de Groq, Gemini, Anthropic, OpenAI e APIs compatíveis)
@@ -7274,8 +7330,29 @@ function atuBanner(j){if(!j||!j.disponivel||$('#atu-b'))return;if(LS.g('atu_igno
       $('#atu-b').innerHTML=r.pagina?'<div><b>A página da versão nova foi aberta no navegador.</b><span class="sub">Baixe, abra e pode apagar a versão antiga.</span></div>':'<div><b>Atualização baixada.</b><span class="sub">A versão nova está abrindo em outra janela; esta pode ser fechada.</span></div>';}
     catch(e){toast(e.message);b.disabled=false;b.textContent='Tentar de novo';}};}
 setTimeout(()=>{api('/api/atualizacao').then(atuBanner).catch(()=>{});},8000);
-/* conta Google recém-conectada neste aparelho (ex.: login pelo navegador do celular): traz os dados da nuvem */
-setTimeout(async()=>{try{if(!USR.usuario)await usrCarrega();if(USR.logado&&USR.usuario&&USR.usuario.puxar){await usrPosLogin();toast('Dados da sua conta Google carregados.');}}catch(e){}},600);
+/* ---------- sincronização de mão dupla entre aparelhos (computador e celular) pela conta Google ---------- */
+function aplicaTudo(d){syncPausa=true;try{SYNC_KEYS.forEach(k=>{try{if(k in d)localStorage.setItem(k,RAW_KEYS.includes(k)?String(d[k]):JSON.stringify(d[k]));else if(k!=='tema'&&k!=='som')localStorage.removeItem(k);}catch(e){}});}finally{syncPausa=false;}recarregaEstado();}
+let sincT=0,sincando=false;
+async function sincConta(forcar){
+  if(sincando)return null;if(!USR.usuario)await usrCarrega();if(!(USR.logado&&USR.usuario&&USR.usuario.drive))return null;
+  if(!forcar&&Date.now()-sincT<20000)return null;sincando=true;
+  try{if(syncT){clearTimeout(syncT);syncT=null;await empurra();}
+    const r=await apiPost('/api/sincronizar',{});sincT=Date.now();
+    if(r&&r.puxou&&r.dados){aplicaTudo(r.dados);toast('Dados atualizados com o seu outro aparelho.');}
+    const antes=USR.usuario&&USR.usuario.erro_sync;await usrCarrega();
+    if((r&&(r.puxou||r.aviso))||antes!==(USR.usuario&&USR.usuario.erro_sync))try{usrRender();}catch(e){}
+    return r;}catch(e){return null;}finally{sincando=false;}}
+async function usrPosLogin(manual){
+  if(syncT){clearTimeout(syncT);syncT=null;}
+  await usrCarrega();let r=null;
+  try{r=await apiPost('/api/sincronizar',{});sincT=Date.now();}catch(e){}
+  if(r&&r.dados&&Object.keys(r.dados).length)aplicaTudo(r.dados);else await empurra();
+  await usrCarrega();usrChip();usrRender();if(r&&r.aviso)toast(r.aviso);else if(r&&r.puxou)toast('Dados da sua conta carregados.');
+}
+setTimeout(()=>sincConta(true),1500);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')sincConta(false);});
+window.addEventListener('focus',()=>sincConta(false));
+setInterval(()=>{if(document.visibilityState==='visible')sincConta(false);},45000);
 
 </script>
 </body>

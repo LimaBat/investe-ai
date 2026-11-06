@@ -45,7 +45,12 @@ class AdaptadorAndroid(BaseAdapter):
         try:
             con = URL(request.url).openConnection()
             con.setInstanceFollowRedirects(False)  # o requests segue os redirecionamentos (e guarda os cookies)
-            con.setRequestMethod(request.method)
+            metodo = request.method.upper()
+            if metodo == "PATCH":  # o HttpURLConnection do Android não aceita PATCH; o Google entende o POST com este cabeçalho
+                con.setRequestMethod("POST")
+                con.setRequestProperty("X-HTTP-Method-Override", "PATCH")
+            else:
+                con.setRequestMethod(metodo)
             con.setConnectTimeout(int(ct * 1000))
             con.setReadTimeout(int(rt * 1000))
             for k, v in request.headers.items():
