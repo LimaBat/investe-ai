@@ -4409,6 +4409,9 @@ body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #d
 .tut-anel{position:fixed;display:none;pointer-events:none;border-radius:14px;box-shadow:0 0 0 2px var(--accent),0 0 22px 2px rgba(94,234,212,.45);animation:tutPulso 1.6s ease-in-out infinite;transition:left .25s,top .25s,width .25s,height .25s}
 @keyframes tutPulso{50%{box-shadow:0 0 0 2px var(--accent),0 0 6px 0 rgba(94,234,212,.2)}}
 
+.gv-tabs .chip{display:inline-flex;align-items:center;gap:6px}.gv-dot{width:8px;height:8px;border-radius:9px;display:inline-block}
+@media(max-width:760px){canvas#gv-cv.gp{height:320px}}
+
 </style>
 </head>
 <body>
@@ -4630,7 +4633,7 @@ body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #d
   <div class="head"><h1>Minha <span class="grad">carteira</span></h1><div class="inv-bts"><button class="chip priv-bt" type="button"></button><button class="btn ghost sm" id="inv-imp" type="button" data-tip="Traga as negociações do site da B3 (Área do Investidor) ou de uma planilha.">Importar</button><button class="btn sm" id="inv-novo" type="button">+ Lançamento</button></div></div>
   <p class="sub">Registre compras, vendas e aplicações para acompanhar posição, resultado, proventos, rentabilidade contra o CDI e o imposto de renda, como no aplicativo da corretora. Tudo fica salvo neste computador.</p>
   <div id="inv-resumo" class="grid g4 mt"></div>
-  <div class="tb2" id="inv-tabs"><button class="chip on" data-k="pos" type="button" data-tip="Seus ativos, quanto valem hoje e o resultado de cada um.">Posição</button><button class="chip" data-k="graf" type="button" data-tip="Gráfico com a variação de todos os seus ativos no período.">Gráfico</button><button class="chip" data-k="lanc" type="button" data-tip="Histórico de compras e vendas. Edite, exclua, importe ou exporte.">Lançamentos</button><button class="chip" data-k="rf" type="button" data-tip="CDB, Tesouro, LCI/LCA e outros, com o valor atualizado pelo CDI, Selic ou IPCA.">Renda fixa</button><button class="chip" data-k="prov" type="button" data-tip="Dividendos e rendimentos recebidos e a projeção para os próximos 12 meses.">Proventos</button><button class="chip" data-k="rent" type="button" data-tip="Quanto sua carteira rendeu dia a dia comparada com CDI, Ibovespa e inflação.">Rentabilidade</button><button class="chip" data-k="ir" type="button" data-tip="Apuração mensal de imposto sobre vendas, DARF e lista para a declaração anual.">Imposto de renda</button><button class="chip" data-k="apps" type="button" data-tip="Quais aplicativos e corretoras reais combinam com você para investir de verdade.">Qual app usar</button></div>
+  <div class="tb2" id="inv-tabs"><button class="chip on" data-k="pos" type="button" data-tip="Seus ativos, quanto valem hoje e o resultado de cada um.">Posição</button><button class="chip" data-k="graf" type="button" data-tip="Gráfico do seu patrimônio e de cada ativo, com velas, médias móveis e indicadores.">Gráfico</button><button class="chip" data-k="lanc" type="button" data-tip="Histórico de compras e vendas. Edite, exclua, importe ou exporte.">Lançamentos</button><button class="chip" data-k="rf" type="button" data-tip="CDB, Tesouro, LCI/LCA e outros, com o valor atualizado pelo CDI, Selic ou IPCA.">Renda fixa</button><button class="chip" data-k="prov" type="button" data-tip="Dividendos e rendimentos recebidos e a projeção para os próximos 12 meses.">Proventos</button><button class="chip" data-k="rent" type="button" data-tip="Quanto sua carteira rendeu dia a dia comparada com CDI, Ibovespa e inflação.">Rentabilidade</button><button class="chip" data-k="ir" type="button" data-tip="Apuração mensal de imposto sobre vendas, DARF e lista para a declaração anual.">Imposto de renda</button><button class="chip" data-k="apps" type="button" data-tip="Quais aplicativos e corretoras reais combinam com você para investir de verdade.">Qual app usar</button></div>
   <div id="inv-pos"></div><div id="inv-graf" style="display:none"></div><div id="inv-lanc" style="display:none"></div><div id="inv-rf" style="display:none"></div><div id="inv-prov" style="display:none"></div><div id="inv-rent" style="display:none"></div><div id="inv-ir" style="display:none"></div><div id="inv-apps" style="display:none"></div>
 </section>
 
@@ -7117,14 +7120,14 @@ function ctAutoTabela(j,v){const h=$('#ct-auto-c');if(!h)return;
   $$('#ct-auto-c tr[data-a]').forEach(r=>r.onclick=()=>analisar(r.dataset.a));}
 
 /* ---------- minha carteira: gráfico com todos os ativos ---------- */
-async function invGrafRender(c){const h=$('#inv-graf'),tks=c.linhas.map(l=>l.t);
+async function invGrafCmp(c){const h=$('#gv-corpo'),tks=c.linhas.map(l=>l.t);
   if(!tks.length){h.innerHTML=c.R.length?'<div class="card"><p class="sub">Você só tem renda fixa. O gráfico mostra ações, FIIs, ETFs, ativos do exterior e cripto.</p></div>':invVazio();INV.gKey='';return;}
   const per=INV.gPer||'6mo',key=tks.slice().sort().join(',')+'|'+per;
   if(INV.gKey===key&&h.querySelector('#gr-ch')&&Date.now()-(INV.gT||0)<300000)return;INV.gKey=key;
   const pers=[['1mo','1 mês'],['6mo','6 meses'],['1y','1 ano'],['5y','5 anos']];
   h.innerHTML=`<div class="card"><div class="head"><h2 style="margin:0">Desempenho dos seus ativos</h2><div class="tb2" style="margin:0" id="gr-per">${pers.map(([k,n])=>`<button class="chip${k===per?' on':''}" type="button" data-p="${k}">${n}</button>`).join('')}</div></div>
     <p class="sub" style="margin:4px 0 10px">Quanto cada ativo da sua carteira subiu ou caiu no período (preços reais). Passe o mouse sobre o gráfico para ver os valores de cada dia e clique nos ativos abaixo para mostrar ou esconder cada linha.</p><div class="tb2" id="gr-sel" style="margin:4px 0 10px;gap:6px"></div><div id="gr-ch">${skel(1,300)}</div></div><div id="gr-tab"></div>`;
-  $$('#gr-per [data-p]').forEach(b=>b.onclick=()=>{INV.gPer=b.dataset.p;INV.gKey='';invGrafRender(INV.calc||invCalc());});
+  $$('#gr-per [data-p]').forEach(b=>b.onclick=()=>{INV.gPer=b.dataset.p;INV.gKey='';invGrafCmp(INV.calc||invCalc());});
   try{const j=await api('/api/carteira/grafico?periodo='+per+'&tickers='+encodeURIComponent(tks.join(',')));if(INV.gKey!==key)return;if(j.erro)throw new Error(j.erro);INV.gT=Date.now();
     INV.gJ=j;INV.gOff=INV.gOff||new Set();const desenha=()=>{const S=j.series.map((s,i)=>({n:s.t,c:CORES_L[i%CORES_L.length],v:INV.gOff.has(s.t)?null:s.v,w:2}));graficoLinhas($('#gr-ch'),j.datas,S,v=>(v>=0?'+':'')+fmt(v,1,'%'));
       $('#gr-sel').innerHTML=`<button type="button" class="chip" data-g="*">Todos</button><button type="button" class="chip" data-g="-">Nenhum</button>`+j.series.map((s,i)=>`<button type="button" class="chip gr-t${INV.gOff.has(s.t)?'':' on'}" data-g="${esc(s.t)}"><i style="background:${CORES_L[i%CORES_L.length]}"></i>${esc(s.t)}</button>`).join('');
@@ -7266,7 +7269,8 @@ function gpCalc(D){const n=D.c.length,c=D.c;
   for(let i=1;i<n;i++){const d=c[i]-c[i-1],g=Math.max(d,0),p=Math.max(-d,0);if(i<=14){ag+=g/14;ap+=p/14;if(i===14)rsi[i]=ap===0?100:100-100/(1+ag/ap);}else{ag=(ag*13+g)/14;ap=(ap*13+p)/14;rsi[i]=ap===0?100:100-100/(1+ag/ap);}}
   const e12=ema(c,12),e26=ema(c,26),macd=c.map((_,i)=>e12[i]!=null&&e26[i]!=null?e12[i]-e26[i]:null),sig=ema(macd,9),hist=macd.map((v,i)=>v!=null&&sig[i]!=null?v-sig[i]:null);
   return {mm20,mm50,mm200,bbU,bbL,rsi,macd,sig,hist};}
-function grafPro(cv,j,op){const D=gpPrep(j),N=D.c.length,I=gpCalc(D);let hov=-1;
+const FMTP0=v=>fmtP(v);
+function grafPro(cv,j,op){const D=gpPrep(j),N=D.c.length,I=gpCalc(D);let hov=-1;const fmtP=v=>(op.fmt||FMTP0)(v);
   function draw(){const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!N)return;
     cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
     const S=getComputedStyle(document.documentElement),V=k=>S.getPropertyValue(k).trim(),up=V('--good'),dn=V('--bad'),acc=V('--accent'),mut=V('--muted'),ln=V('--line'),tx=V('--text'),cd=V('--card2'),wr=V('--warn'),a2=V('--accent2');
@@ -7297,7 +7301,7 @@ function grafPro(cv,j,op){const D=gpPrep(j),N=D.c.length,I=gpCalc(D);let hov=-1;
         const li=(a,cor)=>{g.beginPath();let s=false;for(let i=0;i<N;i++){if(a[i]==null)continue;s?g.lineTo(X(i),Ym(a[i])):g.moveTo(X(i),Ym(a[i]));s=true;}g.strokeStyle=cor;g.lineWidth=1.4;g.stroke();g.lineWidth=1;};li(I.macd,acc);li(I.sig,wr);
         g.fillStyle=mut;g.textAlign='left';g.fillText('MACD (12, 26, 9)',x0+6,y0+13);}}
     if(hov>=0){const x=X(hov),c=D.c[hov],ant=hov?D.c[hov-1]:D.o[hov],vr=ant?(c/ant-1)*100:0;g.strokeStyle=mut;g.setLineDash([3,3]);g.beginPath();g.moveTo(x,pad.t);g.lineTo(x,h-pad.b);g.stroke();g.setLineDash([]);
-      const T=[D.lb2[hov]||D.lb[hov]||''];if(velas)T.push(`Abertura ${fmtP(D.o[hov])}   Máxima ${fmtP(D.h[hov])}`,`Mínima ${fmtP(D.l[hov])}   Fechamento ${fmtP(c)}`);else T.push('Preço '+fmtP(c));
+      const T=[D.lb2[hov]||D.lb[hov]||''];if(velas)T.push(`Abertura ${fmtP(D.o[hov])}   Máxima ${fmtP(D.h[hov])}`,`Mínima ${fmtP(D.l[hov])}   Fechamento ${fmtP(c)}`);else T.push((op.rotulo||'Preço')+' '+fmtP(c));
       T.push(`Variação ${vr>=0?'+':''}${fmt(vr,2,'%')}`+(D.v[hov]?`   Volume ${abrevN(D.v[hov])}`:''));
       const mm=[];if(op.mm20&&I.mm20[hov]!=null)mm.push('MM20 '+fmtP(I.mm20[hov]));if(op.mm50&&I.mm50[hov]!=null)mm.push('MM50 '+fmtP(I.mm50[hov]));if(op.mm200&&I.mm200[hov]!=null)mm.push('MM200 '+fmtP(I.mm200[hov]));if(op.painel==='rsi'&&I.rsi[hov]!=null)mm.push('IFR '+fmt(I.rsi[hov],0));if(mm.length)T.push(mm.join('   '));
       g.font='12px '+F;const bwd=Math.max(...T.map(t=>g.measureText(t).width))+22,bh=T.length*17+12;let bx=x+14;if(bx+bwd>x1)bx=x-bwd-14;if(bx<x0)bx=x0;const by=pad.t+6;
@@ -7531,6 +7535,76 @@ document.addEventListener('click',e=>{if(e.target&&e.target.id==='tut-ver')tutor
 setTimeout(()=>{try{if(localStorage.getItem('inv_tutorial'))return;const d=(window.__DADOS__||{}).dados||{};
   const usado=['sim_movs','lanc','favs','alertas','rf','sim_lanc'].some(k=>{const v=d[k];return v&&(Array.isArray(v)?v.length:Object.keys(v).length);});
   if(usado){localStorage.setItem('inv_tutorial','1');return;}tutorial();}catch(e){}},1200);
+
+/* ---------- aba Gráfico da carteira: Patrimônio, Comparar ativos e um gráfico por ativo (com as ferramentas da análise) ---------- */
+const GV_OP=()=>INV.gOp||(INV.gOp=Object.assign({tipo:'candle',mm20:false,mm50:true,mm200:false,bb:false,vol:true,painel:'rsi'},LS.g('gp_op',{})));
+const GV_PER_PAT=[['1mo','1M','no mês'],['6mo','6M','em 6 meses'],['1y','1A','em 12 meses'],['tudo','Tudo','desde o início']];
+function gvTools(host,pers,per,patr,aoPer,aoOp){const o=GV_OP();
+  const ind=[['mm20','MM20','Média móvel de 20 períodos (tendência de curto prazo).'],['mm50','MM50','Média móvel de 50 períodos.'],['mm200','MM200','Média móvel de 200 períodos (tendência de longo prazo).'],['bb','Bollinger','Bandas de Bollinger (20, 2): a faixa de oscilação normal.']].concat(patr?[]:[['vol','Volume','Volume negociado em cada período.']]);
+  host.innerHTML=pers.map(([k,n])=>`<button class="chip${per===k?' on':''}" type="button" data-p="${k}">${n}</button>`).join('')+'<span class="sep"></span>'+
+   `<button class="chip${o.tipo!=='linha'?' on':''}" type="button" data-o="candle" data-tip="Candles: abertura, máxima, mínima e fechamento de cada período.">Candles</button><button class="chip${o.tipo==='linha'?' on':''}" type="button" data-o="linha">Linha</button><span class="sep"></span>`+
+   ind.map(([k,n,t])=>`<button class="chip${o[k]?' on':''}" type="button" data-t="${k}" data-tip="${t}">${n}</button>`).join('')+
+   (patr?'':'<span class="sep"></span>'+[['rsi','IFR','Índice de força relativa (14): acima de 70 pode indicar sobrecompra; abaixo de 30, sobrevenda.'],['macd','MACD','Convergência e divergência de médias móveis (12, 26, 9).'],['nenhum','Sem painel','Esconde o painel inferior.']].map(([k,n,t])=>`<button class="chip${o.painel===k?' on':''}" type="button" data-pn="${k}" data-tip="${t}">${n}</button>`).join(''));
+  host.onclick=e=>{const b=e.target.closest('button');if(!b)return;
+    if(b.dataset.p){aoPer(b.dataset.p);return;}
+    if(b.dataset.o)o.tipo=b.dataset.o;else if(b.dataset.t)o[b.dataset.t]=!o[b.dataset.t];else if(b.dataset.pn)o.painel=b.dataset.pn;
+    LS.s('gp_op',{tipo:o.tipo,mm20:o.mm20,mm50:o.mm50,mm200:o.mm200,bb:o.bb,vol:o.vol,painel:o.painel});gvTools(host,pers,per,patr,aoPer,aoOp);aoOp();};}
+function gvOp(patr){const o=GV_OP();return patr?Object.assign({},o,{vol:false,painel:'nenhum',rotulo:'Patrimônio',fmt:v=>document.body.classList.contains('privado')?'•••':dinA(v,MOE.c)}):o;}
+async function invGrafRender(c){const H=$('#inv-graf'),tks=c.linhas.map(l=>l.t),sim=simAtivo();
+  if(!tks.length&&!sim){H.innerHTML=c.R.length?'<div class="card"><p class="sub">Você só tem renda fixa. O gráfico mostra ações, FIIs, ETFs, ativos do exterior e cripto.</p></div>':invVazio();INV.gKey='';return;}
+  let vis=INV.gVis||'pat';if(vis!=='pat'&&vis!=='cmp'&&!tks.includes(vis))vis='pat';if(vis==='cmp'&&!tks.length)vis='pat';INV.gVis=vis;
+  const tabs=[['pat','Patrimônio']].concat(tks.length?[['cmp','Comparar ativos']]:[]).concat(tks.map(t=>[t,t]));
+  if(!$('#gv-tabs')||INV.gvTks!==tks.join(',')){INV.gvTks=tks.join(',');INV.gKey='';H.innerHTML=`<div class="tb2 gv-tabs" id="gv-tabs" style="margin:0 0 12px;gap:6px"></div><div id="gv-corpo"></div>`;}
+  $('#gv-tabs').innerHTML=tabs.map(([k,n],i)=>`<button type="button" class="chip${k===vis?' on':''}" data-gv="${esc(k)}">${i>1?`<i class="gv-dot" style="background:${CORES_L[(i-2)%CORES_L.length]}"></i>`:''}${esc(n)}</button>`).join('');
+  $$('#gv-tabs [data-gv]').forEach(b=>b.onclick=()=>{INV.gVis=b.dataset.gv;INV.gKey='';invGrafRender(INV.calc||invCalc());});
+  if(vis==='cmp')return invGrafCmp(c);if(vis==='pat')return invPatRender(c);return invAtivoGraf(vis,c);}
+async function invAtivoGraf(t,c){const h=$('#gv-corpo'),per=INV.gaPer||'1y',key='a|'+t+'|'+per;
+  if(INV.gKey===key&&h.querySelector('#gv-cv')&&Date.now()-(INV.gT||0)<300000)return;INV.gKey=key;INV.gT=Date.now();
+  const l=c.linhas.find(x=>x.t===t)||{};
+  h.innerHTML=`<div class="card"><div class="head" style="align-items:flex-start"><div><h2 style="margin:0">${esc(t)} <span class="tag">${esc(CATN[t]||l.cls||'')}</span></h2><div class="sub" id="gv-var" style="margin-top:4px"></div></div>
+    <div style="text-align:right"><div class="sub">Você tem <b>${fmtQ(l.q)}</b> · ${moneyH(l.valor)}</div>${l.resp!=null?`<div class="sub">Resultado desde a compra ${pctH(l.resp,1)}</div>`:''}</div></div>
+    <div class="gp-tools mt" id="gv-tools"></div><canvas id="gv-cv" class="gp"></canvas>
+    <div class="tb2" style="margin:12px 0 0"><button class="btn sm" type="button" id="gv-neg">Comprar / vender</button><button class="btn ghost sm" type="button" id="gv-an">Análise completa</button></div></div>`;
+  $('#gv-neg').onclick=()=>invNovo(null,{t});$('#gv-an').onclick=()=>analisar(t);
+  let ch=null;const cv=$('#gv-cv');
+  gvTools($('#gv-tools'),GP_PER,per,false,p=>{INV.gaPer=p;INV.gKey='';invAtivoGraf(t,INV.calc||invCalc());},()=>{if(ch)ch.set(gvOp(false));});
+  try{const j=await api('/api/ohlc?ticker='+encodeURIComponent(t)+'&periodo='+per);if(INV.gKey!==key)return;
+    ch=grafPro(cv,j,gvOp(false));ch.draw();const nm=(GP_PER.find(x=>x[0]===per)||[])[2]||'';$('#gv-var').innerHTML=`${pctH(j.ret)} ${nm}${j.agreg?` · uma barra por ${j.agreg}`:''}`;}
+  catch(e){if(INV.gKey===key){INV.gKey='';cv.replaceWith(Object.assign(document.createElement('div'),{innerHTML:errBox(e.message)}));}}}
+/* patrimônio total dia a dia: saldo disponível + valor dos investimentos (preços de fechamento) */
+function patSerie(c,rent){const sim=simAtivo(),M=sim?simMovs():[],hj=hojeISO(),dM=m=>isoDe(new Date(m.t||Date.now()));
+  const movAte=d=>M.reduce((a,m)=>dM(m)<=d?a+(m.tipo==='saq'?-m.v:m.v):a,0);const P=[];
+  if(rent&&rent.datas&&rent.datas.length){const d0=rent.datas[0];
+    [...new Set(M.map(dM))].filter(d=>d<d0).sort().forEach(d=>P.push([d,movAte(d)]));
+    rent.datas.forEach((d,i)=>{const v=(sim?movAte(d)-(rent.inv[i]||0)+(rent.prov[i]||0):0)+(rent.pat[i]||0);if(isFinite(v))P.push([d,v]);});}
+  else if(sim)[...new Set(M.map(dM))].sort().forEach(d=>P.push([d,movAte(d)]));
+  const agora=(c.pat||0)+(sim?(c.caixa||0):0);if(P.length&&P[P.length-1][0]===hj)P[P.length-1][1]=agora;else P.push([hj,agora]);
+  return P;}
+async function invPatRender(c){const h=$('#gv-corpo'),per=INV.gpPer||'tudo',L=invLanc(),R=invRF(),sim=simAtivo(),sig=JSON.stringify([L,R]),key='p|'+per+'|'+sig+'|'+JSON.stringify(sim?simMovs():[]);
+  if(INV.gKey===key&&h.querySelector('#gv-cv')&&Date.now()-(INV.gT||0)<300000)return;INV.gKey=key;INV.gT=Date.now();
+  const tot=(c.pat||0)+(sim?(c.caixa||0):0);
+  h.innerHTML=`<div class="card"><div class="head" style="align-items:flex-start"><div><div class="eyebrow">Seu patrimônio</div><div class="price money" style="font-size:30px;margin-top:2px">${moneyH(tot)}</div><div class="sub" id="gv-var"></div></div>
+    <div style="text-align:right" class="sub">${sim?`Saldo disponível ${moneyH(c.caixa||0)}<br>`:''}Investido ${moneyH(c.pat||0)}</div></div>
+    <div class="gp-tools mt" id="gv-tools"></div><div id="gv-area"><canvas id="gv-cv" class="gp"></canvas></div>
+    <p class="sub" style="font-size:12px;margin-top:8px">${sim?'Soma do saldo disponível com o valor dos seus investimentos em cada dia':'Valor dos seus investimentos em cada dia'}, com os preços de fechamento. Depósitos e saques também mudam o patrimônio. Cada vela mostra de quanto a quanto ele foi no período.</p></div>`;
+  let ch=null;
+  gvTools($('#gv-tools'),GV_PER_PAT,per,true,p=>{INV.gpPer=p;INV.gKey='';invPatRender(INV.calc||invCalc());},()=>{INV.gKey='';invPatRender(INV.calc||invCalc());});
+  let rent=null;
+  if(L.length||R.length){if(INV.rent&&INV.rentSig===sig)rent=INV.rent;else{try{const j=await apiPost('/api/carteira/rent',{lanc:L,rf:R});if(!j.erro){rent=j;INV.rent=j;INV.rentSig=sig;}}catch(e){}}if(INV.gKey!==key)return;}
+  let P=patSerie(c,rent);
+  if(per!=='tudo'){const d=new Date();if(per==='1mo')d.setMonth(d.getMonth()-1);else if(per==='6mo')d.setMonth(d.getMonth()-6);else d.setFullYear(d.getFullYear()-1);const ls=isoDe(d);
+    const ant=P.filter(x=>x[0]<ls).pop();P=P.filter(x=>x[0]>=ls);if(ant)P.unshift([ls,ant[1]]);}
+  if(P.length<2){$('#gv-area').innerHTML='<p class="sub" style="padding:30px 0;text-align:center">O gráfico do patrimônio aparece a partir do segundo dia de uso. Faça compras e volte amanhã para ver a evolução.</p>';return;}
+  const cvt1=v=>{const x=brlDe(v);return x==null?v:x;},V=P.map(x=>cvt1(x[1]));
+  /* cada vela: de quanto a quanto o patrimônio foi no período (um dia ou, em períodos longos, uma semana) */
+  const semana=GV_OP().tipo!=='linha'&&P.length>70,G=[];
+  P.forEach((x,i)=>{const d=new Date(x[0]+'T12:00:00'),k=semana?isoDe(new Date(d.getTime()-((d.getDay()+6)%7)*86400000)):x[0],g=G[G.length-1],ant=i?V[i-1]:V[i];
+    if(g&&g.k===k){g.c=V[i];g.h=Math.max(g.h,V[i]);g.l=Math.min(g.l,V[i]);g.d2=x[0];}else G.push({k,d:x[0],d2:x[0],o:ant,c:V[i],h:Math.max(ant,V[i]),l:Math.min(ant,V[i])});});
+  const j={c:G.map(g=>g.c),o:G.map(g=>g.o),h:G.map(g=>g.h),l:G.map(g=>g.l),v:G.map(()=>0),lb:G.map(g=>dataBR(g.d).slice(0,5)),lb2:G.map(g=>semana&&g.d2!==g.d?'Semana de '+dataBR(g.d)+' a '+dataBR(g.d2):dataBR(g.d))};
+  ch=grafPro($('#gv-cv'),j,gvOp(true));ch.draw();
+  const ini=V[0],fim=V[V.length-1],nm=(GV_PER_PAT.find(x=>x[0]===per)||[])[2]||'';
+  const dif=fim-ini;$('#gv-var').innerHTML=`<span class="money ${dif>=0?'pos':'neg'}">${dif>=0?'+':'−'}${esc(dinA(Math.abs(dif),MOE.c))}</span> ${nm}${sim?' (inclui depósitos e saques)':''}${semana?' · uma vela por semana':''}`;privAplica();}
+window.addEventListener('resize',()=>{if(INV.tab==='graf'&&INV.gVis!=='cmp'){INV.gKey='';const c=INV.calc;if(c&&$('#v-invest').classList.contains('on'))invGrafRender(c);}});
 
 </script>
 </body>
