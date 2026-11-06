@@ -917,12 +917,29 @@ def abrir_janela(url, esperar=False):
     _abrir_navegador(url)
 
 
+_JANELAS = []  # processos das janelas abertas por este programa
+
+
+def _fechar_janelas():
+    for pj in list(_JANELAS):
+        try:
+            if pj.poll() is not None: continue
+            if os.name == "nt":  # o .exe abre um processo filho: fecha a árvore inteira
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(pj.pid)], creationflags=0x08000000,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            else:
+                pj.terminate()
+        except Exception:
+            pass
+
+
 def _janela_propria(url):
     marca = os.path.join(BASE, "janela_ok")
     try:
         try: os.remove(marca)
         except OSError: pass
         pj = subprocess.Popen([sys.executable, "--janela", url], close_fds=True, env=dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1"))
+        _JANELAS.append(pj)
         for _ in range(60):  # até 30 s: a janela avisa que abriu, ou o processo termina com erro
             if os.path.exists(marca): return
             if pj.poll() is not None: break
@@ -948,7 +965,7 @@ def _abrir_navegador(url):
         exe = os.path.expandvars(c)
         if os.path.exists(exe):
             try:
-                subprocess.Popen([exe, f"--app={url}", "--start-maximized", f"--user-data-dir={os.path.join(BASE, 'janela')}", "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"])
+                _JANELAS.append(subprocess.Popen([exe, f"--app={url}", "--start-maximized", f"--user-data-dir={os.path.join(BASE, 'janela')}", "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"]))
                 return
             except Exception:
                 log("Falha ao abrir " + exe)
@@ -974,6 +991,19 @@ class _Servidor(ThreadingHTTPServer):
             except OSError:
                 pass
         super().server_bind()
+
+
+def _fechar_janelas_antigas():
+    """Versões até a 3.9 deixavam a janela aberta ao serem substituídas: fecha as janelas do Investe.AI que sobraram."""
+    if os.name != "nt" or not CONGELADO: return
+    try:
+        ps = ("Get-CimInstance Win32_Process -Filter \"Name='Investe.AI.exe'\" | "
+              "Where-Object { $_.CommandLine -like '*--janela*' -and $_.ProcessId -ne %d -and $_.ParentProcessId -ne %d } | "
+              "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }") % (os.getpid(), os.getpid())
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], creationflags=0x08000000,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    except Exception:
+        log("fechar janelas antigas:\n" + traceback.format_exc())
 
 
 def _instancia_aberta():
@@ -1002,6 +1032,7 @@ def _instancia_aberta():
                     pass
             except OSError:
                 break
+        _fechar_janelas_antigas()
         return None
     except Exception:
         return None
@@ -1013,6 +1044,12 @@ def _iniciar_splash():
         if url:
             log("O programa já estava aberto; abrindo outra janela em " + url)
             if "--no-window" not in sys.argv:
+                try:
+                    import urllib.request
+                    urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url + "api/abrir-janela", timeout=3).read()
+                    os._exit(0)
+                except Exception:
+                    pass
                 abrir_janela(url, esperar=True)
             os._exit(0)
     srv = _Servidor(("127.0.0.1", 0), _SplashHandler)
@@ -3651,8 +3688,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "app": "investe.ai", "versao": VERSAO, "build": BUILD})
             if p == "/api/quit":
                 self._send(200, {"ok": True})
-                threading.Timer(0.4, lambda: os._exit(0)).start()
+                def _sair():
+                    _fechar_janelas(); os._exit(0)
+                threading.Timer(0.4, _sair).start()
                 return
+            if p == "/api/abrir-janela":  # outro clique no atalho com o programa aberto: a janela nova fica sob o controle deste
+                abrir_janela(f"http://127.0.0.1:{self.server.server_address[1]}/")
+                return self._send(200, {"ok": True})
             rotas = {
                 "/api/conta": lambda: conta_estado(),
                 "/api/dados": lambda: api_dados_ler(),
