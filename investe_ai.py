@@ -1721,7 +1721,7 @@ def api_entrar(d):
     return conta_estado()
 
 def api_sair():
-    c = cfg(); c.pop("sessao", None); cfg_salvar(c)
+    c = cfg(); c.pop("sessao", None); c.pop("sessao_marca", None); cfg_salvar(c)
     return conta_estado()
 
 # ---- dados do usuário (favoritos, carteira, notícias lidas...)
@@ -1940,29 +1940,80 @@ def _drive_tok(u):
     return tok
 
 
-def _drive_achar(tok):
+def _drive_achar(tok, nome=None):
     r = requests.get("https://www.googleapis.com/drive/v3/files", headers={"Authorization": "Bearer " + tok}, timeout=20,
-                     params={"spaces": "appDataFolder", "q": f"name='{DRIVE_ARQ}'", "fields": "files(id)"})
+                     params={"spaces": "appDataFolder", "q": f"name='{nome or DRIVE_ARQ}'", "fields": "files(id)"})
     if r.status_code >= 400: raise _drive_erro(r)
     f = r.json().get("files", [])
     return f[0]["id"] if f else None
 
 
-def _drive_enviar(u, conteudo):
+def _drive_enviar(u, conteudo, nome=None):
     tok = _drive_tok(u)
     corpo = json.dumps(conteudo, ensure_ascii=False).encode("utf-8")
     H = {"Authorization": "Bearer " + tok}
-    fid = _drive_achar(tok)
+    fid = _drive_achar(tok, nome)
     if fid:
         r = requests.patch(f"https://www.googleapis.com/upload/drive/v3/files/{fid}?uploadType=media",
                            headers={**H, "Content-Type": "application/json"}, data=corpo, timeout=30)
     else:
         b = "invb" + secrets.token_hex(6)
-        meta = json.dumps({"name": DRIVE_ARQ, "parents": ["appDataFolder"]})
+        meta = json.dumps({"name": nome or DRIVE_ARQ, "parents": ["appDataFolder"]})
         body = (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{b}\r\nContent-Type: application/json\r\n\r\n").encode() + corpo + f"\r\n--{b}--".encode()
         r = requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
                           headers={**H, "Content-Type": f"multipart/related; boundary={b}"}, data=body, timeout=30)
     if r.status_code >= 400: raise _drive_erro(r)
+
+
+def _drive_ler(tok, nome):
+    fid = _drive_achar(tok, nome)
+    if not fid: return None
+    r = requests.get(f"https://www.googleapis.com/drive/v3/files/{fid}?alt=media", headers={"Authorization": "Bearer " + tok}, timeout=30)
+    if r.status_code >= 400: raise _drive_erro(r)
+    try: return r.json()
+    except Exception: return None
+
+
+# ---- Uma conta aberta em um aparelho por vez: o último a entrar fica; os outros saem sozinhos
+DRIVE_SESSAO = "investe_ai_sessao.json"
+
+
+class ContaEmOutroAparelho(Exception):
+    pass
+
+
+def _aparelho():
+    c = cfg()
+    if not c.get("aparelho_id"):
+        c["aparelho_id"] = secrets.token_hex(8); cfg_salvar(c)
+    if ANDROID: nome = "celular Android"
+    elif sys.platform == "darwin": nome = "Mac"
+    else:
+        nome = "computador"
+        try: nome += " " + (socket.gethostname() or "")[:30]
+        except Exception: pass
+    return c["aparelho_id"], nome.strip()
+
+
+def _sessao_conferir(u):
+    """Neste aparelho a conta acabou de ser aberta: marca no Drive que ela está aqui. Senão, confere se outro aparelho entrou depois."""
+    uid = u["id"]
+    meu, nome = _aparelho()
+    if cfg().get("sessao_marca") != uid:
+        _drive_enviar(u, {"aparelho": meu, "nome": nome, "desde": time.time()}, DRIVE_SESSAO)
+        c = cfg(); c["sessao_marca"] = uid; cfg_salvar(c)
+        return
+    ses = _drive_ler(_drive_tok(u), DRIVE_SESSAO)
+    if isinstance(ses, dict) and ses.get("aparelho") and ses["aparelho"] != meu:
+        raise ContaEmOutroAparelho(str(ses.get("nome") or "outro aparelho")[:60])
+
+
+def _sair_por_outro_aparelho(uid, onde):
+    with _trava:
+        c = cfg()
+        if c.get("sessao") == uid:
+            c.pop("sessao", None); c.pop("sessao_marca", None); cfg_salvar(c)
+    log("Conta aberta em outro aparelho (" + onde + "); saindo neste.")
 
 
 def drive_pull(uid):
@@ -1992,6 +2043,7 @@ def sincronizar_conta(uid, so_enviar=False):
     if not gu.get("drive"): return None
     trava = _sync_travas.setdefault(uid, threading.Lock())
     with trava:
+        _sessao_conferir(u)
         L = dados_ler(uid)
         rem = drive_pull(uid)
         rts = rem.get("atualizado", 0) if rem else None
@@ -2027,6 +2079,7 @@ def sincronizar_conta(uid, so_enviar=False):
 
 def _drive_push_bg(uid):
     try: sincronizar_conta(uid, so_enviar=True)
+    except ContaEmOutroAparelho: pass  # a tela percebe na próxima sincronização e avisa antes de sair
     except Exception as e:
         log("sincronizar (envio): " + str(e)); _marca_sync(uid, str(e)[:200])
 
@@ -2037,6 +2090,9 @@ def api_sincronizar():
     aviso = None; acao = None
     try:
         acao = sincronizar_conta(u["id"])
+    except ContaEmOutroAparelho as e:
+        _sair_por_outro_aparelho(u["id"], str(e))
+        return {"deslogado": True, "aviso": f"Sua conta foi aberta em outro aparelho ({e}). Ela fica aberta em um aparelho por vez; entre de novo para usar aqui."}
     except Exception as e:
         log("sincronizar: " + str(e)); _marca_sync(u["id"], str(e)[:200])
         aviso = (str(e) if isinstance(e, RuntimeError) else "Não consegui falar com o Google Drive agora.") + " Os dados continuam salvos neste aparelho."
@@ -7338,14 +7394,20 @@ async function sincConta(forcar){
   if(!forcar&&Date.now()-sincT<20000)return null;sincando=true;
   try{if(syncT){clearTimeout(syncT);syncT=null;await empurra();}
     const r=await apiPost('/api/sincronizar',{});sincT=Date.now();
+    if(r&&r.deslogado){contaSaiu(r.aviso);return r;}
     if(r&&r.puxou&&r.dados){aplicaTudo(r.dados);toast('Dados atualizados com o seu outro aparelho.');}
     const antes=USR.usuario&&USR.usuario.erro_sync;await usrCarrega();
     if((r&&(r.puxou||r.aviso))||antes!==(USR.usuario&&USR.usuario.erro_sync))try{usrRender();}catch(e){}
     return r;}catch(e){return null;}finally{sincando=false;}}
+/* a conta foi aberta em outro aparelho: este sai (a página recarrega já sem a conta) */
+function contaSaiu(aviso){try{sessionStorage.setItem('aviso_saida',aviso||'Sua conta foi aberta em outro aparelho.');}catch(e){}location.reload();}
+{let av=null;try{av=sessionStorage.getItem('aviso_saida');sessionStorage.removeItem('aviso_saida');}catch(e){}
+  if(av)setTimeout(()=>{const d=document.createElement('dialog');d.className='dlg';d.innerHTML='<h2>Você saiu da conta neste aparelho</h2><p class="sub" style="margin:10px 0 16px"></p><div style="text-align:right"><button class="btn" type="button">Entendi</button></div>';d.querySelector('p').textContent=av;d.querySelector('button').onclick=()=>{d.close();d.remove();};document.body.appendChild(d);try{d.showModal();}catch(e){toast(av);}},900);}
 async function usrPosLogin(manual){
   if(syncT){clearTimeout(syncT);syncT=null;}
   await usrCarrega();let r=null;
   try{r=await apiPost('/api/sincronizar',{});sincT=Date.now();}catch(e){}
+  if(r&&r.deslogado){contaSaiu(r.aviso);return;}
   if(r&&r.dados&&Object.keys(r.dados).length)aplicaTudo(r.dados);else await empurra();
   await usrCarrega();usrChip();usrRender();if(r&&r.aviso)toast(r.aviso);else if(r&&r.puxou)toast('Dados da sua conta carregados.');
 }
