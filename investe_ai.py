@@ -4387,6 +4387,10 @@ select.sel.moe-sel{padding:11px 14px;font-size:14.5px;width:100%}
 @media(max-width:900px){#ct-out .grid[style*="230px"]{grid-template-columns:1fr!important}#ct-out .grid[style*="230px"]>*{min-width:0}}
 @media(max-width:760px){#v-conta .tbl{display:block;overflow-x:auto}}
 .atu-b{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:1300;display:flex;align-items:center;gap:12px;max-width:min(720px,94vw);padding:12px 16px;border:1px solid var(--accent);border-radius:16px;background:var(--bg2);box-shadow:0 20px 50px rgba(0,0,0,.45)}.atu-b>div{flex:1;min-width:0}.atu-b .sub{display:block;font-size:12.5px}
+.atu-b .atu-bts{display:flex;gap:8px;align-items:center;flex:none}
+@media(max-width:760px){.atu-b{flex-direction:column;align-items:stretch;gap:12px;width:calc(100vw - 24px);max-width:none;padding:16px 18px}
+  .atu-b>div:first-child{flex:none}.atu-b b{display:block;font-size:16px;margin-bottom:4px}.atu-b .sub{font-size:13.5px;line-height:1.45}
+  .atu-b .atu-bts{width:100%}.atu-b .atu-bts .btn{flex:1;padding:12px}.atu-b .atu-bts .chip{padding:11px 18px}}
 body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #dx-arq{display:none}
 
 /* tutorial da primeira vez (sem blur: fica leve no celular) */
@@ -7445,7 +7449,8 @@ function novoRecarrega(){{const c=LS.g('moeda_ex','BRL');if(c!==MOE.c&&MOEDAS.so
 
 /* ---------- atualização automática ---------- */
 function atuBanner(j){if(!j||!j.disponivel||$('#atu-b'))return;if(LS.g('atu_ignorar','')===j.versao)return;
-  document.body.insertAdjacentHTML('beforeend',`<div id="atu-b" class="atu-b"><div><b>Nova versão ${esc(j.versao)} do Investe.AI</b><span class="sub">Você está na ${esc(j.atual)}.${j.notas?' '+esc(j.notas.split('\n')[0].slice(0,140)):''}</span></div><button class="btn sm" type="button" id="atu-ok">${j.automatica?'Atualizar agora':'Baixar'}</button><button class="chip" type="button" id="atu-no">Depois</button></div>`);
+  document.body.insertAdjacentHTML('beforeend',`<div id="atu-b" class="atu-b"><div><b>Nova versão ${esc(j.versao)} do Investe.AI</b><span class="sub">Você está na ${esc(j.atual)}.${j.notas?' '+esc(j.notas.split('\n')[0].slice(0,140)):''}</span></div><div class="atu-bts"><button class="btn sm" type="button" id="atu-ok">${j.automatica?'Atualizar agora':'Baixar'}</button><button class="chip" type="button" id="atu-no">Depois</button></div></div>`);
+  {const b=$('#atu-b'),as=document.querySelector('aside'),pos=()=>{if(b.isConnected)b.style.bottom=(innerWidth<=760&&as?as.offsetHeight+10:20)+'px';};pos();window.addEventListener('resize',pos);}
   $('#atu-no').onclick=()=>{LS.s('atu_ignorar',j.versao);$('#atu-b').remove();};
   $('#atu-ok').onclick=async()=>{const b=$('#atu-ok');b.disabled=true;b.textContent='Baixando…';
     try{const r=await apiPost('/api/atualizar',{});if(r.erro)throw new Error(r.erro);if(EH_ANDROID&&r.url){location.href=r.url;b.disabled=false;b.textContent='Baixar';return;}
