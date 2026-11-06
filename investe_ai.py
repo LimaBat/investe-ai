@@ -1669,7 +1669,7 @@ CFG_PATH = os.path.join(DADOS_DIR, "config.json")
 USERS_PATH = os.path.join(DADOS_DIR, "usuarios.json")
 _trava = threading.RLock()
 CHAVES_SYNC = {"favs", "ativos", "xp", "lic", "jgbest", "qzbest", "ck", "ct", "plano", "news_lidas", "tema", "som",
-               "lanc", "rf", "alertas", "alertas_hist", "privado", "ia_web", "gp_op", "moeda_ex", "apps_pref", "sim_lanc", "sim_rf", "sim_movs", "inv_modo", "ct_auto", "ia_web2"}
+               "lanc", "rf", "alertas", "alertas_hist", "privado", "ia_web", "gp_op", "moeda_ex", "apps_pref", "sim_lanc", "sim_rf", "sim_movs", "inv_modo", "ct_auto", "ia_web2", "ia_vistas"}
 
 def _ler_json(p, padrao):
     try:
@@ -2546,6 +2546,96 @@ def api_ia_testar():
     except requests.exceptions.RequestException: return {"erro": "Não consegui falar com o provedor. Verifique a conexão."}
     except Exception as e: return {"erro": str(e)[:300]}
 
+
+
+# ---- perguntas novas geradas pela IA (quiz, mito ou verdade e casos), sem repetir as que a pessoa já viu
+import random
+IA_TEMAS = ["reserva de emergência", "Tesouro Direto", "CDB, LCI e LCA", "FGC", "juros compostos", "inflação e IPCA", "Selic e CDI",
+            "ações e dividendos", "fundos imobiliários", "ETFs", "BDRs e investir no exterior", "criptomoedas", "diversificação",
+            "perfil de risco", "imposto de renda sobre investimentos", "come-cotas", "liquidez", "marcação a mercado",
+            "P/L, P/VP e ROE", "dividend yield", "volatilidade", "preço médio", "rebalanceamento", "taxas e custos",
+            "previdência privada", "debêntures", "câmbio e dólar", "análise técnica (médias móveis, IFR)", "vieses do investidor",
+            "planejamento de objetivos", "inflação e poder de compra", "renda fixa prefixada e pós-fixada", "IPCA+",
+            "golpes e promessas de lucro garantido", "day trade e riscos", "tributação de dividendos e JCP", "aportes mensais"]
+NIVEL_NOME = {1: "iniciante (conceitos básicos)", 2: "intermediário (renda fixa, indicadores, carteira)",
+              3: "avançado (risco, cálculos, gestão de posição, tributação)", 0: "misturando iniciante, intermediário e avançado"}
+
+
+def _json_lista(txt):
+    t = (txt or "").strip()
+    t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.M).strip()
+    a, b = t.find("["), t.rfind("]")
+    if a < 0 or b <= a: raise ValueError("sem lista")
+    return json.loads(t[a:b + 1])
+
+
+def _txt(v, n=400):
+    return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+
+
+def api_ia_questoes(d):
+    """Gera perguntas inéditas com a IA. tipo: quiz | mito | casos."""
+    tipo = d.get("tipo") if d.get("tipo") in ("quiz", "mito", "casos") else "quiz"
+    try: nivel = int(d.get("nivel") or 0)
+    except Exception: nivel = 0
+    nivel = nivel if nivel in (0, 1, 2, 3) else 0
+    try: n = max(3, min(12, int(d.get("n") or 10)))
+    except Exception: n = 10
+    evitar = [_txt(x, 140) for x in (d.get("evitar") or []) if isinstance(x, str) and x.strip()][-70:]
+    temas = random.sample(IA_TEMAS, 6)
+    sem = random.randint(1000, 9999)
+    base = (f"Crie {n} itens NOVOS e variados, em português do Brasil, para um app educativo de investimentos para o público brasileiro. "
+            f"Priorize estes temas (pode usar outros relacionados): {', '.join(temas)}. Variação nº {sem}: não use as perguntas mais óbvias. "
+            "Seja correto e atual para o Brasil; nada de recomendar ativo específico. Textos curtos e claros.")
+    if tipo == "quiz":
+        fmt = ('Cada item é uma pergunta de múltipla escolha de nível ' + NIVEL_NOME[nivel] + '. Formato: '
+               '{"p": "pergunta", "o": ["alternativa", "alternativa", "alternativa"], "c": índice da correta (0 a 2), '
+               '"e": "explicação de 1 a 2 frases", "n": nível 1, 2 ou 3}. Só uma alternativa correta; as erradas devem ser plausíveis. '
+               'Varie a posição da correta.')
+    elif tipo == "mito":
+        fmt = ('Cada item é uma afirmação comum sobre investimentos para a pessoa julgar se é mito ou verdade. Formato: '
+               '{"f": "afirmação", "v": true se for verdade ou false se for mito, "e": "explicação de 1 a 2 frases"}. '
+               'Misture mitos e verdades (cerca de metade de cada).')
+    else:
+        fmt = ('Cada item é um caso de uma pessoa fictícia com um objetivo financeiro e três opções de decisão. Formato: '
+               '{"w": "Nome, idade", "t": "situação em 1 a 3 frases, com valores em reais e prazo", '
+               '"o": [{"t": "opção", "pts": 10, "e": "por quê"}, {"t": "opção", "pts": 0 a 6, "e": "por quê"}, {"t": "opção", "pts": 0 a 6, "e": "por quê"}]}. '
+               'Exatamente uma opção vale 10 pontos (a melhor); as outras valem de 0 a 6.')
+    if evitar:
+        fmt += "\nNÃO repita nem reformule estes itens que a pessoa já viu:\n- " + "\n- ".join(evitar)
+    sis = "Você cria conteúdo educativo de finanças. Responda SOMENTE com um array JSON válido, sem texto antes ou depois."
+    try:
+        res = ia_chamar([{"role": "user", "content": base + "\n" + fmt}], sis)
+        bruto = _json_lista(res.get("texto"))
+    except IAErro as e:
+        return {"erro": str(e)}
+    except ValueError:
+        return {"erro": "A IA não devolveu perguntas válidas agora."}
+    except Exception as e:
+        log("ia questoes:\n" + traceback.format_exc()); return {"erro": "Não consegui criar perguntas agora."}
+    vistos, itens = {x.lower() for x in evitar}, []
+    for x in bruto if isinstance(bruto, list) else []:
+        if not isinstance(x, dict): continue
+        try:
+            if tipo == "quiz":
+                p, o, c = _txt(x.get("p"), 300), [_txt(a, 200) for a in (x.get("o") or [])][:4], int(x.get("c"))
+                if not p or len(o) < 3 or not all(o) or not 0 <= c < len(o) or p.lower() in vistos: continue
+                nv = int(x.get("n") or nivel or 1)
+                itens.append({"p": p, "o": o, "c": c, "e": _txt(x.get("e")), "n": nv if nv in (1, 2, 3) else (nivel or 1)})
+            elif tipo == "mito":
+                f = _txt(x.get("f"), 300)
+                if not f or not isinstance(x.get("v"), bool) or f.lower() in vistos: continue
+                itens.append({"f": f, "v": x["v"], "e": _txt(x.get("e"))})
+            else:
+                w, t = _txt(x.get("w"), 60), _txt(x.get("t"), 500)
+                ops = [{"t": _txt(o.get("t"), 200), "pts": max(0, min(10, int(o.get("pts")))), "e": _txt(o.get("e"))}
+                       for o in (x.get("o") or []) if isinstance(o, dict)][:3]
+                if not w or not t or len(ops) < 3 or sum(1 for o in ops if o["pts"] == 10) != 1 or t.lower() in vistos: continue
+                itens.append({"w": w, "t": t, "o": ops})
+        except Exception:
+            continue
+    if not itens: return {"erro": "A IA não devolveu perguntas válidas agora."}
+    return {"itens": itens, "modelo": res.get("modelo")}
 # ---- histórico por período (dia, semana, mês, ano, sempre) e plano da carteira
 PER_YF = {"1d": ("1d", "5m"), "5d": ("5d", "30m"), "1mo": ("1mo", "1d"), "6mo": ("6mo", "1d"), "1y": ("1y", "1d"),
           "2y": ("2y", "1d"), "5y": ("5y", "1d"), "max": ("max", "1wk")}
@@ -3725,6 +3815,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/ia": lambda: api_ia(d),
                 "/api/ia/config": lambda: api_ia_config(d),
                 "/api/ia/testar": lambda: api_ia_testar(),
+                "/api/ia/questoes": lambda: api_ia_questoes(d),
                 "/api/eventos": lambda: api_eventos(d),
                 "/api/rf/valor": lambda: api_rf_valor(d),
                 "/api/carteira/rent": lambda: api_carteira_rent(d),
@@ -4493,6 +4584,8 @@ body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #d
 .gp-tools .gp-rot{font-size:12px;color:var(--muted);margin:0 2px 0 4px}.gp-tools .chip.fora{opacity:.5}
 .zoom-reset{position:absolute;top:14px;right:14px;z-index:3;padding:5px 12px!important;font-size:12px!important;background:var(--bg2)!important}
 canvas.gp{cursor:crosshair}
+.iaq-spin{width:38px;height:38px;margin:0 auto;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:iaqg .8s linear infinite}@keyframes iaqg{to{transform:rotate(360deg)}}
+.iaq-selo{display:inline-block;margin:0 0 10px;padding:4px 12px;border-radius:99px;font-size:12px;color:var(--accent);border:1px solid var(--line);background:var(--card)}
 
 </style>
 </head>
@@ -5869,7 +5962,7 @@ function quizMenu(){
   <div class="lvls">${L.map(([l,n,d,c])=>`<div class="gcard" data-q="${l}" style="--gc:${c}" tabindex="0" role="button"><h3>${n}</h3><p>${d}</p><div class="gm"><span>${l===0?12:nq(l)} perguntas</span>${b[l]?`<span class="gbest">Melhor: ${b[l].ok}/${b[l].t}</span>`:''}</div></div>`).join('')}</div></div></div>`;
   $$('#ac-quiz .gcard').forEach(c=>{const go=()=>qzStart(+c.dataset.q);c.onclick=go;c.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go();}};});
 }
-function qzStart(l){const base=shuf(QZ.filter(q=>l===0||q[4]===l));qz={l,list:l===0?base.slice(0,12):base,i:0,ok:0,streak:0,max:0,err:[]};qzShow();}
+function qzStartBase(l){const base=shuf(QZ.filter(q=>l===0||q[4]===l));qz={l,list:l===0?base.slice(0,12):base,i:0,ok:0,streak:0,max:0,err:[]};qzShow();}
 function qzShow(){
   const h=$('#ac-quiz'),q=qz.list[qz.i],ord=shuf(q[1].map((_,i)=>i));
   h.innerHTML=`<div class="qwrap"><div class="qhead"><span>Pergunta ${qz.i+1} de ${qz.list.length}</span><span class="streak ${qz.streak>=3?'hot':''}">Sequência: <b>${qz.streak}</b></span></div><div class="pbar" style="margin:4px 0 14px"><i style="width:${qz.i/qz.list.length*100}%"></i></div>
@@ -6408,7 +6501,7 @@ iaChipCtx();
 /* =====================================================================
    CONTA, GOOGLE E SINCRONIZAÇÃO
    ===================================================================== */
-const SYNC_KEYS=['favs','ativos','xp','lic','jgbest','qzbest','ck','ct','plano','news_lidas','tema','som','lanc','rf','alertas','alertas_hist','privado','ia_web','gp_op','moeda_ex','apps_pref','sim_lanc','sim_rf','sim_movs','inv_modo','ct_auto','ia_web2'],RAW_KEYS=['tema'];
+const SYNC_KEYS=['favs','ativos','xp','lic','jgbest','qzbest','ck','ct','plano','news_lidas','tema','som','lanc','rf','alertas','alertas_hist','privado','ia_web','gp_op','moeda_ex','apps_pref','sim_lanc','sim_rf','sim_movs','inv_modo','ct_auto','ia_web2','ia_vistas'],RAW_KEYS=['tema'];
 let USR={logado:false},syncPausa=false,syncT=null,syncStatus='';
 function coletaLocal(){const o={};SYNC_KEYS.forEach(k=>{const v=localStorage.getItem(k);if(v==null)return;if(RAW_KEYS.includes(k))o[k]=v;else{try{o[k]=JSON.parse(v);}catch(e){}}});return o;}
 function aplicaDados(d){syncPausa=true;try{SYNC_KEYS.forEach(k=>{if(!(k in d))return;try{localStorage.setItem(k,RAW_KEYS.includes(k)?String(d[k]):JSON.stringify(d[k]));}catch(e){}});}finally{syncPausa=false;}recarregaEstado();}
@@ -7769,6 +7862,44 @@ function svgChart(host,labels,series,fm,zoom){fm=fm||brl;
   const desenha=()=>svgChartBase(host,labels.slice(A,B+1),series.map(x=>Object.assign({},x,{v:x.v.slice(A,B+1)})),fm,zoom);
   desenha();if(N<12)return;
   const z=zoomCtl(host,N,()=>[A,B],(a,b)=>{A=a;B=b;host._gz=(A>0||B<N-1)?{k:ck,a:A,b:B}:null;desenha();},cx=>{const r=host.getBoundingClientRect();return Math.max(0,Math.min(1,((cx-r.left)/r.width*700-64)/(700-64-12)));});z.mostra();}
+
+/* ---------- perguntas novas com IA: quiz, mito ou verdade e casos (sem repetir o que a pessoa já viu) ---------- */
+const IAQ={pool:{},pend:{}};
+const iaqNorm=t=>String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim().slice(0,140);
+function iaqVistas(tipo){const v=LS.g('ia_vistas',{});return Array.isArray(v[tipo])?v[tipo]:[];}
+function iaqMarca(tipo,textos){const v=LS.g('ia_vistas',{}),a=(Array.isArray(v[tipo])?v[tipo]:[]).concat(textos.map(iaqNorm)).filter(Boolean);v[tipo]=[...new Set(a)].slice(-300);LS.s('ia_vistas',v);}
+const iaqTexto={quiz:x=>x[0],mito:x=>x[0],casos:x=>x.t};
+/* converte o formato da IA para o formato dos jogos */
+const iaqConv={quiz:(x,l)=>[x.p,x.o,x.c,x.e,l===0?(x.n||1):l],mito:x=>[x.f,x.v,x.e],casos:x=>({w:x.w,t:x.t,o:x.o.map(o=>[o.t,o.pts,o.e])})};
+async function iaqBusca(tipo,nivel,n){const k=tipo+nivel;if(IAQ.pend[k])return IAQ.pend[k];
+  IAQ.pend[k]=(async()=>{try{const vis=iaqVistas(tipo).slice(-70);
+      const j=await Promise.race([apiPost('/api/ia/questoes',{tipo,nivel,n,evitar:vis}),new Promise((_,r)=>setTimeout(()=>r(new Error('tempo')),40000))]);
+      if(!j||j.erro||!j.itens)return [];const vs=new Set(iaqVistas(tipo));
+      return j.itens.map(x=>iaqConv[tipo](x,nivel)).filter(x=>!vs.has(iaqNorm(iaqTexto[tipo](x))));}
+    catch(e){return [];}finally{delete IAQ.pend[k];}})();return IAQ.pend[k];}
+/* pega n itens: primeiro os já gerados em segundo plano, depois pede mais à IA; se a IA falhar, usa as perguntas do app que a pessoa ainda não viu */
+async function iaqPega(tipo,nivel,n,banco){const k=tipo+nivel;let L=(IAQ.pool[k]||[]).splice(0,n);
+  if(L.length<n){const novos=await iaqBusca(tipo,nivel,Math.min(12,Math.max(n,8)));L=L.concat(novos.splice(0,n-L.length));IAQ.pool[k]=(IAQ.pool[k]||[]).concat(novos);}
+  const ia=L.length;
+  if(L.length<n){const vs=new Set(iaqVistas(tipo)),usados=new Set(L.map(x=>iaqNorm(iaqTexto[tipo](x))));let rest=shuf(banco.filter(x=>!vs.has(iaqNorm(iaqTexto[tipo](x)))&&!usados.has(iaqNorm(iaqTexto[tipo](x)))));
+    if(rest.length<n-L.length)rest=rest.concat(shuf(banco.filter(x=>!rest.includes(x))));L=L.concat(rest.slice(0,n-L.length));}
+  iaqMarca(tipo,L.map(iaqTexto[tipo]));
+  setTimeout(()=>{if((IAQ.pool[k]||[]).length<n)iaqBusca(tipo,nivel,Math.min(12,Math.max(n,8))).then(x=>{IAQ.pool[k]=(IAQ.pool[k]||[]).concat(x);});},1500);
+  return {L:shuf(L),ia};}
+function iaqCarregando(h,txt){h.innerHTML=`<div class="qwrap"><div class="card" style="text-align:center;padding:38px 20px"><div class="iaq-spin"></div><h2 style="margin:14px 0 6px">${esc(txt)}</h2><p class="sub">A IA cria perguntas inéditas a cada partida, para você aprender de verdade em vez de decorar respostas.</p></div></div>`;}
+function iaqSelo(h,ia){if(!ia)return;const c=h.querySelector('.qwrap');if(c&&!c.querySelector('.iaq-selo'))c.insertAdjacentHTML('afterbegin','<div class="iaq-selo">Perguntas criadas agora pela IA</div>');}
+/* quiz da Academia */
+var qzStart=async function(l){const h=$('#ac-quiz'),n=l===0?12:10;iaqCarregando(h,'Criando perguntas novas…');
+  const base=QZ.filter(q=>l===0||q[4]===l),{L,ia}=await iaqPega('quiz',l,n,base);
+  const bk=QZ.splice(0,QZ.length,...L);try{qzStartBase(l);}finally{QZ.splice(0,QZ.length,...bk);}
+  if(qz){qz.list=L.slice(0,n);qzShow();iaqSelo(h,ia);}};
+/* jogos: mito ou verdade e qual é a melhor decisão */
+[['mito',MITOS,10,'Criando afirmações novas…'],['casos',CASOS,7,'Criando casos novos…']].forEach(([k,banco,n,txt])=>{const orig=JG[k];
+  JG[k]=async h=>{iaqCarregando(h,txt);const {L,ia}=await iaqPega(k,0,n,banco);const bk=banco.splice(0,banco.length,...L);try{orig(h);}finally{banco.splice(0,banco.length,...bk);}iaqSelo(h,ia);};});
+/* adianta a próxima leva em segundo plano quando a pessoa abre a Academia ou os Jogos */
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('nav button[data-v=academia],nav button[data-v=jogos],#ac-tabs [data-k=quiz]');if(!b)return;
+  const v=b.dataset.v||'academia';if(v==='jogos'){['mito','casos'].forEach(k=>{if(!(IAQ.pool[k+'0']||[]).length)iaqBusca(k,0,10).then(x=>{IAQ.pool[k+'0']=(IAQ.pool[k+'0']||[]).concat(x);});});}
+  else if(!(IAQ.pool['quiz0']||[]).length)iaqBusca('quiz',0,12).then(x=>{IAQ.pool['quiz0']=(IAQ.pool['quiz0']||[]).concat(x);});},true);
 
 </script>
 </body>
