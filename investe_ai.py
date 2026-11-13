@@ -7974,16 +7974,20 @@ const rjPerfil=()=>{const ct=LS.g('ct',null);return ct&&ct.p!=null?ct.p:50;};
 async function rjEstado(){INV.calc=null;const c=invCalc(),cx=c.caixa||0,cfg=rjCfg(),pr={};
   await Promise.all([...new Set(c.linhas.map(l=>l.t))].map(async t=>{try{pr[t]=await simPreco(t);}catch(e){}}));
   const H=c.linhas.filter(l=>l.q>0).map(l=>{const p=pr[l.t],preco=p?p.preco:(l.preco||0);return {t:l.t,q:l.q,p:preco,v:l.q*preco,i:rjClasse(l.t),moeda:p?p.moeda:l.moeda,po:p&&p.preco_orig,ok:!!p,resp:l.resp};});
-  const R=(c.rfL||[]).filter(x=>!x.resg).map(x=>({nome:x.nome,v:x.bruto!=null?x.bruto:x.v,i:x.idx==='selic'?0:1}));
+  const R=(c.rfL||[]).filter(x=>!x.resg).map(x=>({id:x.id,nome:x.nome,v:x.bruto!=null?x.bruto:x.v,liq:x.liq,i:x.idx==='selic'?0:1,diaria:(x.idx==='selic'||x.idx==='cdi')&&!x.venc}));
   const cur=CT_CLS.map(()=>0);H.forEach(h=>cur[h.i]+=h.v);R.forEach(r=>cur[r.i]+=r.v);
   const inv=cur.reduce((a,x)=>a+x,0),T=inv+(cfg.caixa?cx:0),p=rjPerfil(),alvo=ctAloc(p);
   return {c,cx,H,R,cur,inv,T,p,alvo,dev:cur.map((x,i)=>T?x/T*100-alvo[i]:0),pr};}
 /* plano: vende o que passou do alvo, compra o que ficou abaixo (na B3, quantidades inteiras) */
 async function rjPlano(E){const cfg=rjCfg(),{H,cur,T,alvo,cx}=E,vend=[],comp=[],apl=[],av=[];
   const maxDev=Math.max(0,...E.dev.map(Math.abs)),parado=cfg.caixa&&cx>=Math.max(50,T*0.03);
-  if(T<50)return {vend,comp,apl,av:['O patrimônio ainda é pequeno para reajustar.'],dispara:false,maxDev,parado,gasto:0};
-  const dispara=maxDev>=cfg.tol||parado;if(!dispara)return {vend,comp,apl,av,dispara,maxDev,parado,gasto:0};
-  let livre=cfg.caixa?cx:0;const vendido=CT_CLS.map(()=>0);
+  if(T<50)return {vend,comp,apl,resg:[],av:['O patrimônio ainda é pequeno para reajustar.'],dispara:false,maxDev,parado,gasto:0,receita:0};
+  const dispara=maxDev>=cfg.tol||parado;if(!dispara)return {vend,comp,apl,resg:[],av,dispara,maxDev,parado,gasto:0,receita:0};
+  let livre=cfg.caixa?cx:0;const vendido=CT_CLS.map(()=>0),resg=[];
+  CT_CLS.forEach((k,i)=>{if(k.t)return;let exc=cur[i]-T*alvo[i]/100;if(exc<Math.max(20,T*cfg.tol/200))return;
+    E.R.filter(x=>x.i===i&&x.diaria&&x.liq>0&&x.v>0).sort((a,b)=>b.v-a.v).forEach(x=>{if(exc<1)return;const f=Math.min(1,exc/x.v);
+      resg.push({id:x.id,nome:x.nome,f,bruto:x.v*f,recebe:Math.floor(x.liq*f*100)/100,i});livre+=Math.floor(x.liq*f*100)/100;vendido[i]+=x.v*f;exc-=x.v*f;});
+    if(exc>=Math.max(20,T*cfg.tol/200))av.push(`${k.n}: o restante acima do alvo (${din(exc)}) está em títulos com vencimento e não é resgatado automaticamente.`);});
   CT_CLS.forEach((k,i)=>{if(!k.t)return;const exc=cur[i]-T*alvo[i]/100;if(exc<Math.max(20,T*cfg.tol/200))return;
     const hs=H.filter(h=>h.i===i&&h.ok&&h.v>0),tot=hs.reduce((a,h)=>a+h.v,0);
     hs.forEach(h=>{let q=exc*h.v/tot/h.p;q=fracOk(h.t,h.moeda)?Math.floor(q*1e6)/1e6:Math.floor(q+1e-9);q=Math.min(q,h.q);
@@ -8006,10 +8010,14 @@ async function rjPlano(E){const cfg=rjCfg(),{H,cur,T,alvo,cx}=E,vend=[],comp=[],
       pode.sort((a,b)=>qs[a]*precos[a].preco-qs[b]*precos[b].preco);qs[pode[0]]++;sobra-=precos[pode[0]].preco;}
     lst.forEach(t=>{const q=qs[t];if(q>0)comp.push({t,q,p:precos[t].preco,tot:q*precos[t].preco,moeda:precos[t].moeda,po:precos[t].preco_orig,i});});}
   const gasto=comp.reduce((a,x)=>a+x.tot,0)+apl.reduce((a,x)=>a+x.v,0);
-  return {vend,comp,apl,av,dispara,maxDev,parado,gasto,receita:vend.reduce((a,x)=>a+x.tot,0)};}
+  return {vend,comp,apl,resg,av,dispara,maxDev,parado,gasto,receita:vend.reduce((a,x)=>a+x.tot,0)+resg.reduce((a,x)=>a+x.recebe,0)};}
 /* executa no simulador: vendas primeiro, depois compras e aplicações */
 function rjExecuta(P){INV.calc=null;const cx=(invCalc().caixa||0)+P.receita;if(P.gasto>cx+0.01)throw new Error('Saldo insuficiente para o reajuste.');
   const L=LS.g('sim_lanc',[]),Rf=LS.g('sim_rf',[]),hj=hojeISO(),iso=new Date().toISOString(),ag=Date.now();
+  (P.resg||[]).forEach(o=>{const x=Rf.find(y=>y.id===o.id);if(!x||x.resg)return;
+    if(o.f>=0.999){x.resg=hj;x.rts=ag;x.vresg=o.recebe;x.rj=1;return;}
+    const novoV=Math.round(x.v*(1-o.f)*100)/100,parte=Math.round((x.v-novoV)*100)/100;x.v=novoV;
+    Rf.push({id:novoId(),nome:x.nome,idx:x.idx,taxa:x.taxa,d:x.d,ts:x.ts,v:parte,venc:x.venc||'',isento:!!x.isento,resg:hj,rts:ag,vresg:o.recebe,rj:1});});
   P.vend.forEach(o=>L.push({id:novoId(),t:o.t,d:hj,h:iso,tipo:'V',q:o.q,p:o.p,tx:0,moeda:o.moeda,po:o.po,rj:1}));
   P.comp.forEach(o=>L.push({id:novoId(),t:o.t,d:hj,h:iso,tipo:'C',q:o.q,p:o.p,tx:0,moeda:o.moeda,po:o.po,rj:1}));
   P.apl.forEach(a=>Rf.push({id:novoId(),nome:a.nome,idx:a.idx,taxa:a.taxa,d:hj,ts:ag,v:a.v,venc:'',isento:false,rj:1}));
@@ -8018,7 +8026,9 @@ function rjContexto(E,P){const pct=v=>fmt(v,1,'%');
   let t=`Carteira simulada (perfil ${E.p}/100, ${ctPerfil(E.p)[0]}). Patrimônio considerado ${din(E.T)}; saldo parado ${din(E.cx)}.\nClasse: atual x alvo\n`;
   CT_CLS.forEach((k,i)=>{t+=`- ${k.n}: ${pct(E.T?E.cur[i]/E.T*100:0)} x ${E.alvo[i]}%\n`;});
   t+='Ativos: '+E.H.map(h=>`${h.t} ${din(h.v)}${h.resp!=null?' ('+(h.resp>=0?'+':'')+fmt(h.resp,1,'%')+' desde a compra)':''}`).join('; ')+'\n';
-  if(P.dispara)t+='Reajuste calculado: '+[].concat(P.vend.map(o=>`vender ${fmtQ(o.q)} ${o.t}`),P.comp.map(o=>`comprar ${fmtQ(o.q)} ${o.t}`),P.apl.map(a=>`aplicar ${din(a.v)} em ${a.nome}`)).join('; ')+'\n';
+  const ords=[].concat((P.resg||[]).map(o=>`resgatar ${din(o.recebe)} de ${o.nome}`),P.vend.map(o=>`vender ${fmtQ(o.q)} ${o.t}`),P.comp.map(o=>`comprar ${fmtQ(o.q)} ${o.t}`),P.apl.map(a=>`aplicar ${din(a.v)} em ${a.nome}`));
+  if(P.dispara&&!ords.length)t+='Não foi possível montar ordens agora'+(P.av.length?': '+P.av.join(' '):'.')+'\n';
+  else if(P.dispara)t+='Reajuste calculado: '+[].concat((P.resg||[]).map(o=>`resgatar ${din(o.recebe)} de ${o.nome}`),P.vend.map(o=>`vender ${fmtQ(o.q)} ${o.t}`),P.comp.map(o=>`comprar ${fmtQ(o.q)} ${o.t}`),P.apl.map(a=>`aplicar ${din(a.v)} em ${a.nome}`)).join('; ')+'\n';
   else t+=`A carteira está dentro da tolerância de ${rjCfg().tol} pontos percentuais.\n`;return t;}
 async function rjDicas(E,P){
   const q='Você é o assistente de carteira do Investe.AI, um simulador educativo. Com os dados abaixo e o cenário de mercado de hoje, dê de 3 a 4 dicas curtas e práticas sobre a carteira (uma frase cada, numeradas), incluindo se o reajuste calculado faz sentido agora. Não prometa retorno e não use emojis.\n\n'+rjContexto(E,P);
@@ -8030,11 +8040,11 @@ async function rjVerifica(manual){const cfg=rjCfg();if((!cfg.on&&!manual)||RJ.ro
   RJ.rodando=true;rjRender();
   try{const E=await rjEstado(),P=await rjPlano(E);LS.s('rj_ult',Date.now());
     const dicas=cfg.ia?await rjDicas(E,P):'';
-    let exec=false,erro='';if(P.dispara&&cfg.modo==='auto'&&(P.vend.length||P.comp.length||P.apl.length)){try{rjExecuta(P);exec=true;}catch(e){erro=e.message;}}
-    const n=P.vend.length+P.comp.length+P.apl.length;
+    let exec=false,erro='';if(P.dispara&&cfg.modo==='auto'&&(P.resg.length||P.vend.length||P.comp.length||P.apl.length)){try{rjExecuta(P);exec=true;}catch(e){erro=e.message;}}
+    const n=P.resg.length+P.vend.length+P.comp.length+P.apl.length;
     const resumo=exec?`Carteira reajustada: ${n} ordem(ns) executada(s) no simulador.`:P.dispara?(P.parado&&P.maxDev<cfg.tol?`Você tem ${din(E.cx)} parado no saldo.`:`Sua carteira saiu do perfil em até ${fmt(P.maxDev,1)} pontos.`)+(n?` Sugestão: ${n} ordem(ns) de reajuste.`:''):'Sua carteira está equilibrada com o seu perfil.';
     const H=LS.g('rj_hist',[]);H.unshift({id:novoId(),ts:Date.now(),dispara:P.dispara,exec,erro,maxDev:P.maxDev,resumo,dicas,
-      vend:P.vend.map(o=>[o.t,o.q,o.p]),comp:P.comp.map(o=>[o.t,o.q,o.p]),apl:P.apl.map(a=>[a.nome,a.v]),av:P.av,cur:E.cur.map(x=>E.T?x/E.T*100:0),alvo:E.alvo});
+      resg:P.resg.map(o=>[o.nome,o.recebe]),vend:P.vend.map(o=>[o.t,o.q,o.p]),comp:P.comp.map(o=>[o.t,o.q,o.p]),apl:P.apl.map(a=>[a.nome,a.v]),av:P.av,cur:E.cur.map(x=>E.T?x/E.T*100:0),alvo:E.alvo});
     LS.s('rj_hist',H.slice(0,30));if(typeof agendaSync==='function')agendaSync();
     if(cfg.notif&&(P.dispara||dicas||manual)){const d1=(dicas.split(/\n+/).find(x=>/^\s*1[.)]/.test(x))||'').replace(/^\s*1[.)]\s*/,'').replace(/\*\*/g,'');
       rjNotifica(exec?'Carteira reajustada':P.dispara?'Hora de reajustar a carteira':'Dica da IA para sua carteira',(resumo+(d1?' '+d1:'')).slice(0,240));}
@@ -8060,7 +8070,7 @@ function rjRender(){const h=$('#inv-rj');if(!h||h.style.display==='none')return;
     <div class="tb2" style="margin:14px 0 0;align-items:center"><button class="btn sm" type="button" id="rj-agora"${RJ.rodando?' disabled':''}>${RJ.rodando?'Conferindo a carteira…':'Conferir agora'}</button>
       <button class="btn ghost sm" type="button" id="rj-perfil">Mudar o perfil</button><button class="btn ghost sm" type="button" id="rj-teste">Testar notificação</button>
       <span class="sub" style="font-size:12.5px">${ult?'Última conferência: '+new Date(ult).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'Ainda não conferida'}${prox?' · próxima: '+prox.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):''}</span></div>
-    <p class="sub" style="font-size:12px;margin-top:10px">A conferência acontece com o Investe.AI aberto (no celular, ao abrir ou voltar ao app). No modo "Mexer na carteira sozinho", as ordens são executadas só no simulador, com dinheiro fictício. Renda fixa não é resgatada automaticamente.</p></div>
+    <p class="sub" style="font-size:12px;margin-top:10px">A conferência acontece com o Investe.AI aberto (no celular, ao abrir ou voltar ao app). No modo "Mexer na carteira sozinho", as ordens são executadas só no simulador, com dinheiro fictício. Da renda fixa, só o Tesouro Selic e CDBs de liquidez diária podem ser resgatados no reajuste; títulos com vencimento ficam como estão.</p></div>
   <div id="rj-hist">${Hs.length?Hs.map((x,i)=>rjCartao(x,i===0)).join(''):'<div class="card mt"><p class="sub">Nenhuma conferência ainda. Toque em <b>Conferir agora</b> para ver como está a sua carteira.</p></div>'}</div>`;
   const salva=(modo)=>{LS.s('rj_cfg',{on:$('#rj-on').checked,modo:modo||rjCfg().modo,freq:$('#rj-freq').value,tol:+$('#rj-tol').value,caixa:$('#rj-caixa').checked,ia:$('#rj-ia').checked,notif:$('#rj-notif').checked});if(typeof agendaSync==='function')agendaSync();rjRender();};
   $$('#inv-rj [data-rjm]').forEach(b=>b.onclick=()=>{const m=b.dataset.rjm;if(m===rjCfg().modo)return;
@@ -8070,10 +8080,10 @@ function rjRender(){const h=$('#inv-rj');if(!h||h.style.display==='none')return;
   $('#rj-agora').onclick=()=>rjVerifica(true);$('#rj-perfil').onclick=()=>ir('carteira');
   $('#rj-teste').onclick=()=>{apiPost('/api/notificar/permissao',{}).catch(()=>{});rjNotifica('Investe.AI','As notificações de reajuste da carteira estão funcionando.').then(j=>toast(j&&j.ok?'Notificação enviada.':'Este aparelho não aceitou a notificação.'));};
   $$('#rj-hist [data-rjx]').forEach(b=>b.onclick=async()=>{const x=Hs.find(z=>z.id===b.dataset.rjx);if(!x)return;b.disabled=true;b.textContent='Executando…';
-    try{const E=await rjEstado(),P=await rjPlano(E);if(!P.dispara||!(P.vend.length+P.comp.length+P.apl.length))throw new Error('A carteira já está dentro do perfil.');rjExecuta(P);
-      x.exec=true;x.resumo='Reajuste aplicado: '+(P.vend.length+P.comp.length+P.apl.length)+' ordem(ns) executada(s) no simulador.';LS.s('rj_hist',Hs);toast(x.resumo);rjRender();}
+    try{const E=await rjEstado(),P=await rjPlano(E);if(!P.dispara||!(P.resg.length+P.vend.length+P.comp.length+P.apl.length))throw new Error('A carteira já está dentro do perfil.');rjExecuta(P);
+      x.exec=true;x.resumo='Reajuste aplicado: '+(P.resg.length+P.vend.length+P.comp.length+P.apl.length)+' ordem(ns) executada(s) no simulador.';LS.s('rj_hist',Hs);toast(x.resumo);rjRender();}
     catch(e){toast(e.message);b.disabled=false;b.textContent='Aplicar este reajuste';}});}
-function rjCartao(x,prim){const d=new Date(x.ts).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}),ord=[].concat(x.vend.map(o=>`<li><b class="neg">Vender</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.comp.map(o=>`<li><b class="pos">Comprar</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.apl.map(a=>`<li><b class="pos">Aplicar</b> ${din(a[1])} em ${esc(a[0])}</li>`));
+function rjCartao(x,prim){const d=new Date(x.ts).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}),ord=[].concat((x.resg||[]).map(o=>`<li><b class="neg">Resgatar</b> ${din(o[1])} de ${esc(o[0])}</li>`),x.vend.map(o=>`<li><b class="neg">Vender</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.comp.map(o=>`<li><b class="pos">Comprar</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.apl.map(a=>`<li><b class="pos">Aplicar</b> ${din(a[1])} em ${esc(a[0])}</li>`));
   const barras=(x.cur||[]).map((v,i)=>`<div class="rj-b"><span>${esc(CT_CLS[i].n)}</span><div class="rj-t"><i style="width:${Math.min(100,v)}%;background:${CT_CLS[i].c}"></i><em style="left:${x.alvo[i]}%"></em></div><b>${fmt(v,0,'%')} <small>alvo ${x.alvo[i]}%</small></b></div>`).join('');
   return `<div class="card mt rj-c"><div class="head" style="align-items:flex-start;margin-bottom:6px"><div><div class="eyebrow">${esc(d)}</div><h3 style="margin:4px 0">${esc(x.resumo)}</h3></div>
     <span class="pill ${x.exec?'':x.dispara?'warn':''}">${x.exec?'Executado':x.dispara?'Reajuste sugerido':'Equilibrada'}</span></div>
