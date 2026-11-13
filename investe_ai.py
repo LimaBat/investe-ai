@@ -1669,7 +1669,7 @@ CFG_PATH = os.path.join(DADOS_DIR, "config.json")
 USERS_PATH = os.path.join(DADOS_DIR, "usuarios.json")
 _trava = threading.RLock()
 CHAVES_SYNC = {"favs", "ativos", "xp", "lic", "jgbest", "qzbest", "ck", "ct", "plano", "news_lidas", "tema", "som",
-               "lanc", "rf", "alertas", "alertas_hist", "privado", "ia_web", "gp_op", "moeda_ex", "apps_pref", "sim_lanc", "sim_rf", "sim_movs", "inv_modo", "ct_auto", "ia_web2", "ia_vistas"}
+               "lanc", "rf", "alertas", "alertas_hist", "privado", "ia_web", "gp_op", "moeda_ex", "apps_pref", "sim_lanc", "sim_rf", "sim_movs", "inv_modo", "ct_auto", "ia_web2", "ia_vistas", "rj_cfg", "rj_hist", "rj_ult"}
 
 def _ler_json(p, padrao):
     try:
@@ -3730,6 +3730,50 @@ def api_pasta():
 
 
 
+
+# ---- notificações do sistema (reajuste da carteira e dicas da IA)
+def _toast_windows(titulo, texto):
+    q = lambda v: "'" + str(v).replace("'", "''") + "'"
+    ps = ("[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;"
+          "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+          "$t = $x.GetElementsByTagName('text');"
+          f"$t.Item(0).AppendChild($x.CreateTextNode({q(titulo)})) > $null; $t.Item(1).AppendChild($x.CreateTextNode({q(texto)})) > $null;"
+          "$n = [Windows.UI.Notifications.ToastNotification]::new($x);"
+          "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($n)")
+    enc = base64.b64encode(ps.encode("utf-16-le")).decode()
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
+                       creationflags=0x08000000, capture_output=True, timeout=30)
+    if r.returncode != 0: log("notificação Windows: " + (r.stderr or b"").decode("utf-8", "ignore")[:300])
+
+
+def api_notificar(d):
+    titulo = re.sub(r"\s+", " ", str((d or {}).get("titulo") or "Investe.AI")).strip()[:80]
+    texto = re.sub(r"\s+", " ", str((d or {}).get("texto") or "")).strip()[:300]
+    if not texto: return {"erro": "Sem texto."}
+    try:
+        if ANDROID:
+            import investe_android
+            return {"ok": bool(investe_android.notificar(titulo, texto))}
+        if os.name == "nt":
+            threading.Thread(target=_toast_windows, args=(titulo, texto), daemon=True).start()
+            return {"ok": True}
+        if sys.platform == "darwin":
+            subprocess.Popen(["osascript", "-e", f"display notification {json.dumps(texto)} with title {json.dumps(titulo)}"])
+            return {"ok": True}
+    except Exception as e:
+        log("notificar: " + repr(e)); return {"erro": "Não consegui mostrar a notificação."}
+    return {"ok": False}
+
+
+def api_notificar_permissao():
+    if ANDROID:
+        try:
+            import investe_android
+            investe_android.pedir_permissao()
+        except Exception as e:
+            log("permissão de notificação: " + repr(e))
+    return {"ok": True}
+
 # ---------------------------------------------------------------- ciclo de vida (fecha ao fechar a janela)
 estado = {"ultimo_ping": time.time(), "visto": False, "bye": None}
 
@@ -3816,6 +3860,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/ia/config": lambda: api_ia_config(d),
                 "/api/ia/testar": lambda: api_ia_testar(),
                 "/api/ia/questoes": lambda: api_ia_questoes(d),
+                "/api/notificar": lambda: api_notificar(d),
+                "/api/notificar/permissao": lambda: api_notificar_permissao(),
                 "/api/eventos": lambda: api_eventos(d),
                 "/api/rf/valor": lambda: api_rf_valor(d),
                 "/api/carteira/rent": lambda: api_carteira_rent(d),
@@ -4586,6 +4632,13 @@ body.android #dx-pasta,body.android #dx-exp,body.android #dx-imp,body.android #d
 canvas.gp{cursor:crosshair}
 .iaq-spin{width:38px;height:38px;margin:0 auto;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:iaqg .8s linear infinite}@keyframes iaqg{to{transform:rotate(360deg)}}
 .iaq-selo{display:inline-block;margin:0 0 10px;padding:4px 12px;border-radius:99px;font-size:12px;color:var(--accent);border:1px solid var(--line);background:var(--card)}
+.rj-cfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 18px;margin-top:12px}
+.rj-cfg label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}.rj-cfg label.ck{flex-direction:row;align-items:center;color:var(--text)}
+.rj-cfg select{padding:9px 10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--line)}
+.rj-bars{display:grid;gap:8px;margin:10px 0}.rj-b{display:grid;grid-template-columns:minmax(120px,210px) 1fr 110px;gap:10px;align-items:center;font-size:13px}
+.rj-t{position:relative;height:10px;border-radius:9px;background:var(--line)}.rj-t i{position:absolute;inset:0 auto 0 0;border-radius:9px}.rj-t em{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text);opacity:.8}
+.rj-b b{text-align:right}.rj-b small{color:var(--muted);font-weight:400}.rj-dicas{color:var(--text);line-height:1.55;font-size:14px}
+@media(max-width:760px){.rj-b{grid-template-columns:1fr 70px}.rj-b .rj-t{grid-column:1/-1;grid-row:2}}
 
 </style>
 </head>
@@ -4808,8 +4861,8 @@ canvas.gp{cursor:crosshair}
   <div class="head"><h1>Minha <span class="grad">carteira</span></h1><div class="inv-bts"><button class="chip priv-bt" type="button"></button><button class="btn ghost sm" id="inv-imp" type="button" data-tip="Traga as negociações do site da B3 (Área do Investidor) ou de uma planilha.">Importar</button><button class="btn sm" id="inv-novo" type="button">+ Lançamento</button></div></div>
   <p class="sub">Registre compras, vendas e aplicações para acompanhar posição, resultado, proventos, rentabilidade contra o CDI e o imposto de renda, como no aplicativo da corretora. Tudo fica salvo neste computador.</p>
   <div id="inv-resumo" class="grid g4 mt"></div>
-  <div class="tb2" id="inv-tabs"><button class="chip on" data-k="pos" type="button" data-tip="Seus ativos, quanto valem hoje e o resultado de cada um.">Posição</button><button class="chip" data-k="graf" type="button" data-tip="Gráfico do seu patrimônio e de cada ativo, com velas, médias móveis e indicadores.">Gráfico</button><button class="chip" data-k="lanc" type="button" data-tip="Histórico de compras e vendas. Edite, exclua, importe ou exporte.">Lançamentos</button><button class="chip" data-k="rf" type="button" data-tip="CDB, Tesouro, LCI/LCA e outros, com o valor atualizado pelo CDI, Selic ou IPCA.">Renda fixa</button><button class="chip" data-k="prov" type="button" data-tip="Dividendos e rendimentos recebidos e a projeção para os próximos 12 meses.">Proventos</button><button class="chip" data-k="rent" type="button" data-tip="Quanto sua carteira rendeu dia a dia comparada com CDI, Ibovespa e inflação.">Rentabilidade</button><button class="chip" data-k="ir" type="button" data-tip="Apuração mensal de imposto sobre vendas, DARF e lista para a declaração anual.">Imposto de renda</button><button class="chip" data-k="apps" type="button" data-tip="Quais aplicativos e corretoras reais combinam com você para investir de verdade.">Qual app usar</button></div>
-  <div id="inv-pos"></div><div id="inv-graf" style="display:none"></div><div id="inv-lanc" style="display:none"></div><div id="inv-rf" style="display:none"></div><div id="inv-prov" style="display:none"></div><div id="inv-rent" style="display:none"></div><div id="inv-ir" style="display:none"></div><div id="inv-apps" style="display:none"></div>
+  <div class="tb2" id="inv-tabs"><button class="chip on" data-k="pos" type="button" data-tip="Seus ativos, quanto valem hoje e o resultado de cada um.">Posição</button><button class="chip" data-k="graf" type="button" data-tip="Gráfico do seu patrimônio e de cada ativo, com velas, médias móveis e indicadores.">Gráfico</button><button class="chip" data-k="lanc" type="button" data-tip="Histórico de compras e vendas. Edite, exclua, importe ou exporte.">Lançamentos</button><button class="chip" data-k="rf" type="button" data-tip="CDB, Tesouro, LCI/LCA e outros, com o valor atualizado pelo CDI, Selic ou IPCA.">Renda fixa</button><button class="chip" data-k="prov" type="button" data-tip="Dividendos e rendimentos recebidos e a projeção para os próximos 12 meses.">Proventos</button><button class="chip" data-k="rent" type="button" data-tip="Quanto sua carteira rendeu dia a dia comparada com CDI, Ibovespa e inflação.">Rentabilidade</button><button class="chip" data-k="ir" type="button" data-tip="Apuração mensal de imposto sobre vendas, DARF e lista para a declaração anual.">Imposto de renda</button><button class="chip" data-k="rj" type="button" data-tip="A IA confere sua carteira, avisa quando ela sai do seu perfil e pode reajustá-la sozinha.">Reajuste automático</button><button class="chip" data-k="apps" type="button" data-tip="Quais aplicativos e corretoras reais combinam com você para investir de verdade.">Qual app usar</button></div>
+  <div id="inv-pos"></div><div id="inv-graf" style="display:none"></div><div id="inv-lanc" style="display:none"></div><div id="inv-rf" style="display:none"></div><div id="inv-prov" style="display:none"></div><div id="inv-rent" style="display:none"></div><div id="inv-ir" style="display:none"></div><div id="inv-rj" style="display:none"></div><div id="inv-apps" style="display:none"></div>
 </section>
 
 <!-- ALERTAS -->
@@ -6501,7 +6554,7 @@ iaChipCtx();
 /* =====================================================================
    CONTA, GOOGLE E SINCRONIZAÇÃO
    ===================================================================== */
-const SYNC_KEYS=['favs','ativos','xp','lic','jgbest','qzbest','ck','ct','plano','news_lidas','tema','som','lanc','rf','alertas','alertas_hist','privado','ia_web','gp_op','moeda_ex','apps_pref','sim_lanc','sim_rf','sim_movs','inv_modo','ct_auto','ia_web2','ia_vistas'],RAW_KEYS=['tema'];
+const SYNC_KEYS=['favs','ativos','xp','lic','jgbest','qzbest','ck','ct','plano','news_lidas','tema','som','lanc','rf','alertas','alertas_hist','privado','ia_web','gp_op','moeda_ex','apps_pref','sim_lanc','sim_rf','sim_movs','inv_modo','ct_auto','ia_web2','ia_vistas','rj_cfg','rj_hist','rj_ult'],RAW_KEYS=['tema'];
 let USR={logado:false},syncPausa=false,syncT=null,syncStatus='';
 function coletaLocal(){const o={};SYNC_KEYS.forEach(k=>{const v=localStorage.getItem(k);if(v==null)return;if(RAW_KEYS.includes(k))o[k]=v;else{try{o[k]=JSON.parse(v);}catch(e){}}});return o;}
 function aplicaDados(d){syncPausa=true;try{SYNC_KEYS.forEach(k=>{if(!(k in d))return;try{localStorage.setItem(k,RAW_KEYS.includes(k)?String(d[k]):JSON.stringify(d[k]));}catch(e){}});}finally{syncPausa=false;}recarregaEstado();}
@@ -6875,13 +6928,13 @@ function invInit(){
   simGarante();simUIInit();simUI();
   if(!INV_OK){INV_OK=true;$$('#inv-tabs .chip').forEach(b=>b.onclick=()=>invTab(b.dataset.k));$('#inv-novo').onclick=()=>invNovo();$('#inv-imp').onclick=()=>invImportar();}
   privAplica();invTab(INV.tab,true);invAtualiza();}
-function invTab(k,sem){INV.tab=k;$$('#inv-tabs .chip').forEach(b=>b.classList.toggle('on',b.dataset.k===k));['pos','graf','lanc','rf','prov','rent','ir','apps'].forEach(x=>{$('#inv-'+x).style.display=x===k?'':'none';});if(!sem)invRenderTudo();}
+function invTab(k,sem){INV.tab=k;$$('#inv-tabs .chip').forEach(b=>b.classList.toggle('on',b.dataset.k===k));['pos','graf','lanc','rf','prov','rent','ir','apps','rj'].forEach(x=>{const e=$('#inv-'+x);if(e)e.style.display=x===k?'':'none';});if(!sem)invRenderTudo();}
 async function invAtualiza(forcar){
   invCalc();invRenderTudo();
   if(!invLanc().length&&!invRF().length)return;
   await invDados(forcar);invCalc();invRenderTudo();homeInvDesenha();}
 function invRenderTudo(){semPiscar($('#v-invest'));const c=INV.calc||invCalc();invResumo(c);
-  const t=INV.tab;if(t==='graf')invGrafRender(c);else if(t==='pos')invPosRender(c);else if(t==='lanc')invLancRender(c);else if(t==='rf')invRfRender(c);else if(t==='prov')invProvRender(c);else if(t==='rent')invRentCarrega();else if(t==='ir')invIrRender(c);else if(t==='apps')appsRender();privAplica();}
+  const t=INV.tab;if(t==='graf')invGrafRender(c);else if(t==='pos')invPosRender(c);else if(t==='lanc')invLancRender(c);else if(t==='rf')invRfRender(c);else if(t==='prov')invProvRender(c);else if(t==='rent')invRentCarrega();else if(t==='ir')invIrRender(c);else if(t==='apps')appsRender();else if(t==='rj')rjRender();privAplica();}
 function invVazio(){if(simAtivo())return simVazio();return `<div class="card vazio-inv"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 6V4h12v2"/><path d="M16 15h.01"/></svg><h2>Sua carteira ainda está vazia</h2><p class="sub" style="max-width:560px;margin:0 auto">Cadastre a primeira compra (ação, FII, ETF, BDR ou cripto) ou uma aplicação de renda fixa. Se você já investe, importe as negociações do site da B3 (Área do Investidor) ou de uma planilha.</p><div class="tb2" style="justify-content:center"><button class="btn" type="button" data-inv="novo" style="padding:12px 22px">+ Primeiro lançamento</button><button class="btn ghost" type="button" data-inv="rf" style="padding:12px 22px">+ Renda fixa</button><button class="btn ghost" type="button" data-inv="imp" style="padding:12px 22px">Importar</button></div></div>`;}
 function invResumo(c){const h=$('#inv-resumo');
   if(simAtivo()){const cx=c.caixa||0,tot=c.pat+cx,res=c.pat-c.custo,resp=c.custo?res/c.custo*100:null,dep=simMovs().reduce((a,m)=>a+(m.tipo==='saq'?-m.v:m.v),0),lucro=tot-dep;
@@ -7900,6 +7953,126 @@ var qzStart=async function(l){const h=$('#ac-quiz'),n=l===0?12:10;iaqCarregando(
 document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('nav button[data-v=academia],nav button[data-v=jogos],#ac-tabs [data-k=quiz]');if(!b)return;
   const v=b.dataset.v||'academia';if(v==='jogos'){['mito','casos'].forEach(k=>{if(!(IAQ.pool[k+'0']||[]).length)iaqBusca(k,0,10).then(x=>{IAQ.pool[k+'0']=(IAQ.pool[k+'0']||[]).concat(x);});});}
   else if(!(IAQ.pool['quiz0']||[]).length)iaqBusca('quiz',0,12).then(x=>{IAQ.pool['quiz0']=(IAQ.pool['quiz0']||[]).concat(x);});},true);
+
+/* ---------- Reajuste automático da carteira: confere o perfil, dicas da IA e notificações ---------- */
+const RJ_PAD={on:false,modo:'avisar',freq:'semanal',tol:5,caixa:true,ia:true,notif:true};
+const rjCfg=()=>Object.assign({},RJ_PAD,LS.g('rj_cfg',{}));
+const RJ_FREQ={diaria:[20*3600e3,'Todo dia'],semanal:[6.5*86400e3,'Toda semana'],mensal:[29*86400e3,'Todo mês']};
+const RJ_ETF_EXT=new Set(['IVVB11','WRLD11','NASD11','SPXI11','ACWI11','EURP11','XINA11','ASIA11','USTK11']),RJ_ETF_CRI=new Set(['HASH11','QBTC11','BITH11','QETH11','ETHE11']);
+const RJ={rodando:false};
+function rjClasse(t){t=String(t||'').toUpperCase();if(RJ_ETF_CRI.has(t))return 6;const c=classeAtivo(t);
+  return c==='Cripto'?6:c==='Moedas e ouro'?5:c==='FIIs'?2:c==='BDRs e exterior'?4:c==='ETFs'?(RJ_ETF_EXT.has(t)?4:3):3;}
+const rjPerfil=()=>{const ct=LS.g('ct',null);return ct&&ct.p!=null?ct.p:50;};
+/* situação de agora: quanto há em cada classe (preços do momento) comparado com o alvo do perfil */
+async function rjEstado(){INV.calc=null;const c=invCalc(),cx=c.caixa||0,cfg=rjCfg(),pr={};
+  await Promise.all([...new Set(c.linhas.map(l=>l.t))].map(async t=>{try{pr[t]=await simPreco(t);}catch(e){}}));
+  const H=c.linhas.filter(l=>l.q>0).map(l=>{const p=pr[l.t],preco=p?p.preco:(l.preco||0);return {t:l.t,q:l.q,p:preco,v:l.q*preco,i:rjClasse(l.t),moeda:p?p.moeda:l.moeda,po:p&&p.preco_orig,ok:!!p,resp:l.resp};});
+  const R=(c.rfL||[]).filter(x=>!x.resg).map(x=>({nome:x.nome,v:x.bruto!=null?x.bruto:x.v,i:x.idx==='selic'?0:1}));
+  const cur=CT_CLS.map(()=>0);H.forEach(h=>cur[h.i]+=h.v);R.forEach(r=>cur[r.i]+=r.v);
+  const inv=cur.reduce((a,x)=>a+x,0),T=inv+(cfg.caixa?cx:0),p=rjPerfil(),alvo=ctAloc(p);
+  return {c,cx,H,R,cur,inv,T,p,alvo,dev:cur.map((x,i)=>T?x/T*100-alvo[i]:0),pr};}
+/* plano: vende o que passou do alvo, compra o que ficou abaixo (na B3, quantidades inteiras) */
+async function rjPlano(E){const cfg=rjCfg(),{H,cur,T,alvo,cx}=E,vend=[],comp=[],apl=[],av=[];
+  const maxDev=Math.max(0,...E.dev.map(Math.abs)),parado=cfg.caixa&&cx>=Math.max(50,T*0.03);
+  if(T<50)return {vend,comp,apl,av:['O patrimônio ainda é pequeno para reajustar.'],dispara:false,maxDev,parado,gasto:0};
+  const dispara=maxDev>=cfg.tol||parado;if(!dispara)return {vend,comp,apl,av,dispara,maxDev,parado,gasto:0};
+  let livre=cfg.caixa?cx:0;const vendido=CT_CLS.map(()=>0);
+  CT_CLS.forEach((k,i)=>{if(!k.t)return;const exc=cur[i]-T*alvo[i]/100;if(exc<Math.max(20,T*cfg.tol/200))return;
+    const hs=H.filter(h=>h.i===i&&h.ok&&h.v>0),tot=hs.reduce((a,h)=>a+h.v,0);
+    hs.forEach(h=>{let q=exc*h.v/tot/h.p;q=fracOk(h.t,h.moeda)?Math.floor(q*1e6)/1e6:Math.floor(q+1e-9);q=Math.min(q,h.q);
+      if(q>0){const v=q*h.p;vend.push({t:h.t,q,p:h.p,tot:v,moeda:h.moeda,po:h.po,i});livre+=v;vendido[i]+=v;}});});
+  const falta=CT_CLS.map((k,i)=>Math.max(0,T*alvo[i]/100-(cur[i]-vendido[i]))),soma=falta.reduce((a,x)=>a+x,0),f=soma>livre?livre/Math.max(soma,1e-9):1;
+  if(ctAuto()&&!CT_SEL&&falta.some((x,i)=>x*f>=10&&CT_CLS[i].t&&!H.some(h=>h.i===i))){
+    try{const cls=falta.map((x,i)=>x*f>=10&&CT_CLS[i].t?i:-1).filter(i=>i>=0);
+      const j=await Promise.race([apiPost('/api/selecao',{perfil:E.p,classes:cls}),new Promise((_,r)=>setTimeout(()=>r(new Error('tempo')),70000))]);
+      if(j&&!j.erro){CT_SEL={p:E.p,v:{},d:j};Object.entries(j.classes||{}).forEach(([i,c])=>CT_SEL.v[+i]=c.escolhidos||[]);}}catch(e){}}
+  const precos=Object.assign({},E.pr);
+  for(let i=0;i<CT_CLS.length;i++){const amt=falta[i]*f,k=CT_CLS[i];if(amt<10)continue;
+    if(!k.t){apl.push(Object.assign({v:Math.floor(amt*100)/100,i},CT_RF[i===0?0:1]));continue;}
+    let tks=H.filter(h=>h.i===i&&h.ok).map(h=>h.t);if(!tks.length)tks=ctTks(i).slice(0,3);
+    await Promise.all(tks.map(async t=>{if(!precos[t]){try{precos[t]=await simPreco(t);}catch(e){}}}));
+    const lst=tks.filter(t=>precos[t]&&precos[t].preco>0&&(fracOk(t,precos[t].moeda)||precos[t].preco<=amt));
+    if(!lst.length){av.push(`O valor para ${k.n.toLowerCase()} (${din(amt)}) é menor que o preço de uma unidade: ficou no saldo.`);continue;}
+    const qs={};let sobra=amt;
+    lst.forEach(t=>{const p=precos[t];let q=amt/lst.length/p.preco;q=fracOk(t,p.moeda)?Math.floor(q*1e6)/1e6:Math.floor(q+1e-9);qs[t]=q;sobra-=q*p.preco;});
+    for(let n=0;n<300;n++){const pode=lst.filter(t=>!fracOk(t,precos[t].moeda)&&precos[t].preco<=sobra+1e-9);if(!pode.length)break;
+      pode.sort((a,b)=>qs[a]*precos[a].preco-qs[b]*precos[b].preco);qs[pode[0]]++;sobra-=precos[pode[0]].preco;}
+    lst.forEach(t=>{const q=qs[t];if(q>0)comp.push({t,q,p:precos[t].preco,tot:q*precos[t].preco,moeda:precos[t].moeda,po:precos[t].preco_orig,i});});}
+  const gasto=comp.reduce((a,x)=>a+x.tot,0)+apl.reduce((a,x)=>a+x.v,0);
+  return {vend,comp,apl,av,dispara,maxDev,parado,gasto,receita:vend.reduce((a,x)=>a+x.tot,0)};}
+/* executa no simulador: vendas primeiro, depois compras e aplicações */
+function rjExecuta(P){INV.calc=null;const cx=(invCalc().caixa||0)+P.receita;if(P.gasto>cx+0.01)throw new Error('Saldo insuficiente para o reajuste.');
+  const L=LS.g('sim_lanc',[]),Rf=LS.g('sim_rf',[]),hj=hojeISO(),iso=new Date().toISOString(),ag=Date.now();
+  P.vend.forEach(o=>L.push({id:novoId(),t:o.t,d:hj,h:iso,tipo:'V',q:o.q,p:o.p,tx:0,moeda:o.moeda,po:o.po,rj:1}));
+  P.comp.forEach(o=>L.push({id:novoId(),t:o.t,d:hj,h:iso,tipo:'C',q:o.q,p:o.p,tx:0,moeda:o.moeda,po:o.po,rj:1}));
+  P.apl.forEach(a=>Rf.push({id:novoId(),nome:a.nome,idx:a.idx,taxa:a.taxa,d:hj,ts:ag,v:a.v,venc:'',isento:false,rj:1}));
+  LS.s('sim_lanc',L);LS.s('sim_rf',Rf);if(typeof agendaSync==='function')agendaSync();INV.rent=null;INV.calc=null;INV.cotT=0;}
+function rjContexto(E,P){const pct=v=>fmt(v,1,'%');
+  let t=`Carteira simulada (perfil ${E.p}/100, ${ctPerfil(E.p)[0]}). Patrimônio considerado ${din(E.T)}; saldo parado ${din(E.cx)}.\nClasse: atual x alvo\n`;
+  CT_CLS.forEach((k,i)=>{t+=`- ${k.n}: ${pct(E.T?E.cur[i]/E.T*100:0)} x ${E.alvo[i]}%\n`;});
+  t+='Ativos: '+E.H.map(h=>`${h.t} ${din(h.v)}${h.resp!=null?' ('+(h.resp>=0?'+':'')+fmt(h.resp,1,'%')+' desde a compra)':''}`).join('; ')+'\n';
+  if(P.dispara)t+='Reajuste calculado: '+[].concat(P.vend.map(o=>`vender ${fmtQ(o.q)} ${o.t}`),P.comp.map(o=>`comprar ${fmtQ(o.q)} ${o.t}`),P.apl.map(a=>`aplicar ${din(a.v)} em ${a.nome}`)).join('; ')+'\n';
+  else t+=`A carteira está dentro da tolerância de ${rjCfg().tol} pontos percentuais.\n`;return t;}
+async function rjDicas(E,P){
+  const q='Você é o assistente de carteira do Investe.AI, um simulador educativo. Com os dados abaixo e o cenário de mercado de hoje, dê de 3 a 4 dicas curtas e práticas sobre a carteira (uma frase cada, numeradas), incluindo se o reajuste calculado faz sentido agora. Não prometa retorno e não use emojis.\n\n'+rjContexto(E,P);
+  try{const j=await apiPost('/api/ia',{mensagens:[{role:'user',content:q}],pesquisar:true});return j&&j.resposta?String(j.resposta).trim().slice(0,1500):'';}catch(e){return '';}}
+const rjNotifica=(titulo,texto)=>apiPost('/api/notificar',{titulo,texto}).catch(()=>{});
+async function rjVerifica(manual){const cfg=rjCfg();if((!cfg.on&&!manual)||RJ.rodando)return;
+  if(!manual&&Date.now()-LS.g('rj_ult',0)<RJ_FREQ[cfg.freq][0])return;
+  INV.calc=null;const c0=invCalc();if(!c0.linhas.length&&!(c0.rfL||[]).length&&!(c0.caixa>0))return;
+  RJ.rodando=true;rjRender();
+  try{const E=await rjEstado(),P=await rjPlano(E);LS.s('rj_ult',Date.now());
+    const dicas=cfg.ia?await rjDicas(E,P):'';
+    let exec=false,erro='';if(P.dispara&&cfg.modo==='auto'&&(P.vend.length||P.comp.length||P.apl.length)){try{rjExecuta(P);exec=true;}catch(e){erro=e.message;}}
+    const n=P.vend.length+P.comp.length+P.apl.length;
+    const resumo=exec?`Carteira reajustada: ${n} ordem(ns) executada(s) no simulador.`:P.dispara?(P.parado&&P.maxDev<cfg.tol?`Você tem ${din(E.cx)} parado no saldo.`:`Sua carteira saiu do perfil em até ${fmt(P.maxDev,1)} pontos.`)+(n?` Sugestão: ${n} ordem(ns) de reajuste.`:''):'Sua carteira está equilibrada com o seu perfil.';
+    const H=LS.g('rj_hist',[]);H.unshift({id:novoId(),ts:Date.now(),dispara:P.dispara,exec,erro,maxDev:P.maxDev,resumo,dicas,
+      vend:P.vend.map(o=>[o.t,o.q,o.p]),comp:P.comp.map(o=>[o.t,o.q,o.p]),apl:P.apl.map(a=>[a.nome,a.v]),av:P.av,cur:E.cur.map(x=>E.T?x/E.T*100:0),alvo:E.alvo});
+    LS.s('rj_hist',H.slice(0,30));if(typeof agendaSync==='function')agendaSync();
+    if(cfg.notif&&(P.dispara||dicas||manual)){const d1=(dicas.split(/\n+/).find(x=>/^\s*1[.)]/.test(x))||'').replace(/^\s*1[.)]\s*/,'').replace(/\*\*/g,'');
+      rjNotifica(exec?'Carteira reajustada':P.dispara?'Hora de reajustar a carteira':'Dica da IA para sua carteira',(resumo+(d1?' '+d1:'')).slice(0,240));}
+    toast(resumo);if(exec){homeInv&&homeInv();}}
+  catch(e){toast('Não consegui conferir a carteira agora: '+(e.message||e));}
+  finally{RJ.rodando=false;rjRender();}}
+function rjRender(){const h=$('#inv-rj');if(!h||h.style.display==='none')return;const cfg=rjCfg(),Hs=LS.g('rj_hist',[]),ult=LS.g('rj_ult',0);
+  const sel=(id,ops,v)=>`<select id="${id}">${ops.map(([k,n])=>`<option value="${k}"${String(v)===String(k)?' selected':''}>${n}</option>`).join('')}</select>`;
+  const prox=cfg.on&&ult?new Date(ult+RJ_FREQ[cfg.freq][0]):null;
+  h.innerHTML=`<div class="card"><div class="head" style="align-items:flex-start"><div><div class="eyebrow">Reajuste automático</div><h2 style="margin:4px 0">Mantenha a carteira no seu perfil</h2>
+      <p class="sub" style="max-width:760px">Com o tempo, o que sobe passa a pesar mais e a carteira sai do perfil. O Investe.AI confere a sua carteira na frequência escolhida, compara cada classe com o alvo do perfil <b>${esc(ctPerfil(rjPerfil())[0])} (${rjPerfil()}/100)</b>, calcula o reajuste e a IA dá dicas. Você recebe uma notificação com o resultado.</p></div>
+      <label class="ck" style="margin:0"><input type="checkbox" id="rj-on"${cfg.on?' checked':''}><span>Ativado</span></label></div>
+    <div class="rj-cfg">
+      <label>O que fazer quando sair do perfil ${sel('rj-modo',[['avisar','Só me avisar com o plano'],['auto','Reajustar sozinho no simulador']],cfg.modo)}</label>
+      <label>Conferir ${sel('rj-freq',Object.entries(RJ_FREQ).map(([k,v])=>[k,v[1].toLowerCase()]),cfg.freq)}</label>
+      <label>Reajustar quando uma classe sair ${sel('rj-tol',[[3,'3 pontos do alvo'],[5,'5 pontos do alvo'],[10,'10 pontos do alvo']],cfg.tol)}</label>
+      <label class="ck"><input type="checkbox" id="rj-caixa"${cfg.caixa?' checked':''}><span>Investir também o saldo parado</span></label>
+      <label class="ck"><input type="checkbox" id="rj-ia"${cfg.ia?' checked':''}><span>Dicas da IA</span></label>
+      <label class="ck"><input type="checkbox" id="rj-notif"${cfg.notif?' checked':''}><span>Notificações</span></label></div>
+    <div class="tb2" style="margin:14px 0 0;align-items:center"><button class="btn sm" type="button" id="rj-agora"${RJ.rodando?' disabled':''}>${RJ.rodando?'Conferindo a carteira…':'Conferir agora'}</button>
+      <button class="btn ghost sm" type="button" id="rj-perfil">Mudar o perfil</button><button class="btn ghost sm" type="button" id="rj-teste">Testar notificação</button>
+      <span class="sub" style="font-size:12.5px">${ult?'Última conferência: '+new Date(ult).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'Ainda não conferida'}${prox?' · próxima: '+prox.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):''}</span></div>
+    <p class="sub" style="font-size:12px;margin-top:10px">A conferência acontece com o Investe.AI aberto (no celular, ao abrir ou voltar ao app). No modo "Reajustar sozinho", as ordens são executadas só no simulador, com dinheiro fictício. Renda fixa não é resgatada automaticamente.</p></div>
+  <div id="rj-hist">${Hs.length?Hs.map((x,i)=>rjCartao(x,i===0)).join(''):'<div class="card mt"><p class="sub">Nenhuma conferência ainda. Toque em <b>Conferir agora</b> para ver como está a sua carteira.</p></div>'}</div>`;
+  const salva=()=>{LS.s('rj_cfg',{on:$('#rj-on').checked,modo:$('#rj-modo').value,freq:$('#rj-freq').value,tol:+$('#rj-tol').value,caixa:$('#rj-caixa').checked,ia:$('#rj-ia').checked,notif:$('#rj-notif').checked});if(typeof agendaSync==='function')agendaSync();rjRender();};
+  ['rj-on','rj-modo','rj-freq','rj-tol','rj-caixa','rj-ia','rj-notif'].forEach(id=>$('#'+id).onchange=()=>{salva();if(id==='rj-on'&&$('#rj-on').checked){apiPost('/api/notificar/permissao',{}).catch(()=>{});if(!LS.g('rj_ult',0))rjVerifica(true);}});
+  $('#rj-agora').onclick=()=>rjVerifica(true);$('#rj-perfil').onclick=()=>ir('carteira');
+  $('#rj-teste').onclick=()=>{apiPost('/api/notificar/permissao',{}).catch(()=>{});rjNotifica('Investe.AI','As notificações de reajuste da carteira estão funcionando.').then(j=>toast(j&&j.ok?'Notificação enviada.':'Este aparelho não aceitou a notificação.'));};
+  $$('#rj-hist [data-rjx]').forEach(b=>b.onclick=async()=>{const x=Hs.find(z=>z.id===b.dataset.rjx);if(!x)return;b.disabled=true;b.textContent='Executando…';
+    try{const E=await rjEstado(),P=await rjPlano(E);if(!P.dispara||!(P.vend.length+P.comp.length+P.apl.length))throw new Error('A carteira já está dentro do perfil.');rjExecuta(P);
+      x.exec=true;x.resumo='Reajuste aplicado: '+(P.vend.length+P.comp.length+P.apl.length)+' ordem(ns) executada(s) no simulador.';LS.s('rj_hist',Hs);toast(x.resumo);rjRender();}
+    catch(e){toast(e.message);b.disabled=false;b.textContent='Aplicar este reajuste';}});}
+function rjCartao(x,prim){const d=new Date(x.ts).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}),ord=[].concat(x.vend.map(o=>`<li><b class="neg">Vender</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.comp.map(o=>`<li><b class="pos">Comprar</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.apl.map(a=>`<li><b class="pos">Aplicar</b> ${din(a[1])} em ${esc(a[0])}</li>`));
+  const barras=(x.cur||[]).map((v,i)=>`<div class="rj-b"><span>${esc(CT_CLS[i].n)}</span><div class="rj-t"><i style="width:${Math.min(100,v)}%;background:${CT_CLS[i].c}"></i><em style="left:${x.alvo[i]}%"></em></div><b>${fmt(v,0,'%')} <small>alvo ${x.alvo[i]}%</small></b></div>`).join('');
+  return `<div class="card mt rj-c"><div class="head" style="align-items:flex-start;margin-bottom:6px"><div><div class="eyebrow">${esc(d)}</div><h3 style="margin:4px 0">${esc(x.resumo)}</h3></div>
+    <span class="pill ${x.exec?'':x.dispara?'warn':''}">${x.exec?'Executado':x.dispara?'Reajuste sugerido':'Equilibrada'}</span></div>
+    <details${prim?' open':''}><summary class="sub">Ver detalhes</summary><div class="rj-bars">${barras}</div>
+    ${ord.length?`<h4 style="margin:12px 0 4px">${x.exec?'Ordens executadas':'Ordens sugeridas'}</h4><ul class="ap-ul">${ord.join('')}</ul>`:''}
+    ${(x.av||[]).length?`<ul class="ap-ul" style="color:var(--warn)">${x.av.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`:''}
+    ${x.erro?`<p class="neg">${esc(x.erro)}</p>`:''}
+    ${x.dicas?`<h4 style="margin:12px 0 4px">Dicas da IA</h4><div class="rj-dicas">${esc(x.dicas).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>')}</div>`:''}
+    ${!x.exec&&ord.length&&prim?`<div class="tb2" style="margin:12px 0 0"><button class="btn sm" type="button" data-rjx="${x.id}">Aplicar este reajuste</button></div>`:''}</details></div>`;}
+/* confere ao abrir o app, ao voltar para ele e a cada 30 minutos */
+setTimeout(()=>rjVerifica(false),20000);setInterval(()=>{if(document.visibilityState==='visible')rjVerifica(false);},30*60e3);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(()=>rjVerifica(false),4000);});
 
 </script>
 </body>

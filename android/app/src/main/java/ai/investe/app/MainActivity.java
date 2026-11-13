@@ -1,6 +1,12 @@
 package ai.investe.app;
 
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -30,9 +36,51 @@ public class MainActivity extends Activity {
     String loginPendente = null;  // volta do login do Google (investeai://login?...)
     volatile boolean servidorPronto = false;
 
+    /* ---- notificações (reajuste da carteira e dicas da IA), chamadas pelo Python ---- */
+    static Context app;
+    static Activity atual;
+    static final String CANAL = "carteira";
+
+    public static boolean notificar(String titulo, String texto) {
+        try {
+            Context c = app;
+            if (c == null) return false;
+            if (Build.VERSION.SDK_INT >= 33 && c.checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                pedirPermissao();
+                return false;
+            }
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            Notification.Builder b;
+            if (Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(new NotificationChannel(CANAL, "Carteira e dicas da IA", NotificationManager.IMPORTANCE_DEFAULT));
+                b = new Notification.Builder(c, CANAL);
+            } else {
+                b = new Notification.Builder(c);
+            }
+            Intent abrir = new Intent(c, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            PendingIntent pi = PendingIntent.getActivity(c, 0, abrir, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            b.setSmallIcon(R.mipmap.ic_launcher).setContentTitle(titulo).setContentText(texto)
+             .setStyle(new Notification.BigTextStyle().bigText(texto)).setAutoCancel(true).setContentIntent(pi);
+            nm.notify((int) (System.currentTimeMillis() % 100000), b.build());
+            return true;
+        } catch (Exception e) {
+            Log.e("InvesteAI", "notificar", e);
+            return false;
+        }
+    }
+
+    public static void pedirPermissao() {
+        final Activity a = atual;
+        if (a == null || Build.VERSION.SDK_INT < 33) return;
+        if (a.checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) return;
+        a.runOnUiThread(() -> a.requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 7));
+    }
+
     @Override
     protected void onCreate(Bundle estado) {
         super.onCreate(estado);
+        app = getApplicationContext();
+        atual = this;
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#0b1020"));
         WebSettings s = web.getSettings();

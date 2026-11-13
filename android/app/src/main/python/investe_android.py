@@ -149,3 +149,14 @@ def iniciar(pasta):
     usar_rede_android_no_google()
     sys.argv = ["investe_ai.py", "--no-window"]
     runpy.run_module("investe_ai", run_name="__main__", alter_sys=True)  # fica no servidor até o app ser encerrado
+
+
+def notificar(titulo, texto):
+    """Notificação do Android (reajuste da carteira e dicas da IA)."""
+    from java import jclass
+    return bool(jclass("ai.investe.app.MainActivity").notificar(str(titulo), str(texto)))
+
+
+def pedir_permissao():
+    from java import jclass
+    jclass("ai.investe.app.MainActivity").pedirPermissao()
