@@ -4639,6 +4639,13 @@ canvas.gp{cursor:crosshair}
 .rj-t{position:relative;height:10px;border-radius:9px;background:var(--line)}.rj-t i{position:absolute;inset:0 auto 0 0;border-radius:9px}.rj-t em{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text);opacity:.8}
 .rj-b b{text-align:right}.rj-b small{color:var(--muted);font-weight:400}.rj-dicas{color:var(--text);line-height:1.55;font-size:14px}
 @media(max-width:760px){.rj-b{grid-template-columns:1fr 70px}.rj-b .rj-t{grid-column:1/-1;grid-row:2}}
+.rj-modos{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.rj-modo{text-align:left;cursor:pointer;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--bg2);color:var(--text);display:flex;flex-direction:column;gap:6px;font:inherit;transition:.15s}
+.rj-modo b{font-size:15px}.rj-modo span{font-size:13px;color:var(--muted);line-height:1.45}
+.rj-modo:hover{border-color:var(--accent2)}.rj-modo.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 8px 24px -12px rgba(94,234,212,.5);background:var(--card)}
+.rj-modo.on b::before{content:'';display:inline-block;width:9px;height:9px;border-radius:9px;background:var(--accent);margin-right:8px;vertical-align:1px}
+.rj-agora-modo{margin:10px 0 0}
+@media(max-width:760px){.rj-modos{grid-template-columns:1fr}}
 
 </style>
 </head>
@@ -8040,8 +8047,11 @@ function rjRender(){const h=$('#inv-rj');if(!h||h.style.display==='none')return;
   h.innerHTML=`<div class="card"><div class="head" style="align-items:flex-start"><div><div class="eyebrow">Reajuste automático</div><h2 style="margin:4px 0">Mantenha a carteira no seu perfil</h2>
       <p class="sub" style="max-width:760px">Com o tempo, o que sobe passa a pesar mais e a carteira sai do perfil. O Investe.AI confere a sua carteira na frequência escolhida, compara cada classe com o alvo do perfil <b>${esc(ctPerfil(rjPerfil())[0])} (${rjPerfil()}/100)</b>, calcula o reajuste e a IA dá dicas. Você recebe uma notificação com o resultado.</p></div>
       <label class="ck" style="margin:0"><input type="checkbox" id="rj-on"${cfg.on?' checked':''}><span>Ativado</span></label></div>
+    <div class="rj-modos" role="radiogroup" aria-label="O que o reajuste faz">
+      <button type="button" class="rj-modo${cfg.modo!=='auto'?' on':''}" data-rjm="avisar" role="radio" aria-checked="${cfg.modo!=='auto'}"><b>Só sugerir</b><span>Avisa e mostra as ordens. Nada muda na carteira até você tocar em "Aplicar este reajuste".</span></button>
+      <button type="button" class="rj-modo${cfg.modo==='auto'?' on':''}" data-rjm="auto" role="radio" aria-checked="${cfg.modo==='auto'}"><b>Mexer na carteira sozinho</b><span>Compra e vende automaticamente no simulador sempre que a carteira sair do perfil, e avisa o que fez.</span></button></div>
+    <p class="sub rj-agora-modo">${cfg.on?(cfg.modo==='auto'?'<b class="warn">Agora:</b> o Investe.AI <b>mexe na sua carteira sozinho</b> quando ela sair do perfil.':'<b class="pos">Agora:</b> o Investe.AI <b>só sugere</b>; a carteira não muda sem você.'):(cfg.modo==='auto'?'O reajuste automático está desativado. Marque <b>Ativado</b> para o app conferir sozinho. O botão <b>Conferir agora</b> segue o modo escolhido: com "Mexer na carteira sozinho", ele já executa as ordens.':'O reajuste automático está desativado. Marque <b>Ativado</b> para o app conferir sozinho na frequência escolhida.')}</p>
     <div class="rj-cfg">
-      <label>O que fazer quando sair do perfil ${sel('rj-modo',[['avisar','Só me avisar com o plano'],['auto','Reajustar sozinho no simulador']],cfg.modo)}</label>
       <label>Conferir ${sel('rj-freq',Object.entries(RJ_FREQ).map(([k,v])=>[k,v[1].toLowerCase()]),cfg.freq)}</label>
       <label>Reajustar quando uma classe sair ${sel('rj-tol',[[3,'3 pontos do alvo'],[5,'5 pontos do alvo'],[10,'10 pontos do alvo']],cfg.tol)}</label>
       <label class="ck"><input type="checkbox" id="rj-caixa"${cfg.caixa?' checked':''}><span>Investir também o saldo parado</span></label>
@@ -8050,10 +8060,13 @@ function rjRender(){const h=$('#inv-rj');if(!h||h.style.display==='none')return;
     <div class="tb2" style="margin:14px 0 0;align-items:center"><button class="btn sm" type="button" id="rj-agora"${RJ.rodando?' disabled':''}>${RJ.rodando?'Conferindo a carteira…':'Conferir agora'}</button>
       <button class="btn ghost sm" type="button" id="rj-perfil">Mudar o perfil</button><button class="btn ghost sm" type="button" id="rj-teste">Testar notificação</button>
       <span class="sub" style="font-size:12.5px">${ult?'Última conferência: '+new Date(ult).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'Ainda não conferida'}${prox?' · próxima: '+prox.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):''}</span></div>
-    <p class="sub" style="font-size:12px;margin-top:10px">A conferência acontece com o Investe.AI aberto (no celular, ao abrir ou voltar ao app). No modo "Reajustar sozinho", as ordens são executadas só no simulador, com dinheiro fictício. Renda fixa não é resgatada automaticamente.</p></div>
+    <p class="sub" style="font-size:12px;margin-top:10px">A conferência acontece com o Investe.AI aberto (no celular, ao abrir ou voltar ao app). No modo "Mexer na carteira sozinho", as ordens são executadas só no simulador, com dinheiro fictício. Renda fixa não é resgatada automaticamente.</p></div>
   <div id="rj-hist">${Hs.length?Hs.map((x,i)=>rjCartao(x,i===0)).join(''):'<div class="card mt"><p class="sub">Nenhuma conferência ainda. Toque em <b>Conferir agora</b> para ver como está a sua carteira.</p></div>'}</div>`;
-  const salva=()=>{LS.s('rj_cfg',{on:$('#rj-on').checked,modo:$('#rj-modo').value,freq:$('#rj-freq').value,tol:+$('#rj-tol').value,caixa:$('#rj-caixa').checked,ia:$('#rj-ia').checked,notif:$('#rj-notif').checked});if(typeof agendaSync==='function')agendaSync();rjRender();};
-  ['rj-on','rj-modo','rj-freq','rj-tol','rj-caixa','rj-ia','rj-notif'].forEach(id=>$('#'+id).onchange=()=>{salva();if(id==='rj-on'&&$('#rj-on').checked){apiPost('/api/notificar/permissao',{}).catch(()=>{});if(!LS.g('rj_ult',0))rjVerifica(true);}});
+  const salva=(modo)=>{LS.s('rj_cfg',{on:$('#rj-on').checked,modo:modo||rjCfg().modo,freq:$('#rj-freq').value,tol:+$('#rj-tol').value,caixa:$('#rj-caixa').checked,ia:$('#rj-ia').checked,notif:$('#rj-notif').checked});if(typeof agendaSync==='function')agendaSync();rjRender();};
+  $$('#inv-rj [data-rjm]').forEach(b=>b.onclick=()=>{const m=b.dataset.rjm;if(m===rjCfg().modo)return;
+    if(m==='auto'&&!confirm('Com esta opção, o Investe.AI vai comprar e vender ativos na sua carteira simulada sozinho, sempre que ela sair do perfil. Continuar?'))return;
+    salva(m);toast(m==='auto'?'O reajuste agora mexe na carteira sozinho.':'O reajuste agora só sugere.');});
+  ['rj-on','rj-freq','rj-tol','rj-caixa','rj-ia','rj-notif'].forEach(id=>$('#'+id).onchange=()=>{salva();if(id==='rj-on'&&$('#rj-on').checked){apiPost('/api/notificar/permissao',{}).catch(()=>{});if(!LS.g('rj_ult',0))rjVerifica(true);}});
   $('#rj-agora').onclick=()=>rjVerifica(true);$('#rj-perfil').onclick=()=>ir('carteira');
   $('#rj-teste').onclick=()=>{apiPost('/api/notificar/permissao',{}).catch(()=>{});rjNotifica('Investe.AI','As notificações de reajuste da carteira estão funcionando.').then(j=>toast(j&&j.ok?'Notificação enviada.':'Este aparelho não aceitou a notificação.'));};
   $$('#rj-hist [data-rjx]').forEach(b=>b.onclick=async()=>{const x=Hs.find(z=>z.id===b.dataset.rjx);if(!x)return;b.disabled=true;b.textContent='Executando…';
