@@ -1,0 +1,75 @@
+name: Publicar o intermediário (IA e reajuste na nuvem)
+
+on:
+  push:
+    branches: [main]
+    paths: ["proxy-ia/**", ".github/workflows/nuvem.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuvem
+  cancel-in-progress: false
+
+jobs:
+  cloudflare:
+    runs-on: ubuntu-24.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Conferir os segredos da Cloudflare
+        id: tem
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::Crie os segredos CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID no GitHub para publicar o intermediário automaticamente."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.tem.outputs.ok == 'true'
+        with:
+          node-version: 20
+      - name: Criar (ou achar) o espaço das inscrições
+        if: steps.tem.outputs.ok == 'true'
+        working-directory: proxy-ia
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
+          ID=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API?per_page=100" | jq -r '.result[] | select(.title=="investe-ai-nuvem") | .id' | head -1)
+          if [ -z "$ID" ]; then
+            ID=$(curl -fsS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" -d '{"title":"investe-ai-nuvem"}' "$API" | jq -r '.result.id')
+          fi
+          test -n "$ID" && test "$ID" != "null"
+          sed -i "s/__NUVEM_KV_ID__/$ID/" wrangler.toml
+          grep -n "id = " wrangler.toml
+      - name: Publicar na Cloudflare
+        if: steps.tem.outputs.ok == 'true'
+        working-directory: proxy-ia
+        run: npx --yes wrangler@4 deploy
+      - name: Guardar os segredos do reajuste na nuvem
+        if: steps.tem.outputs.ok == 'true'
+        working-directory: proxy-ia
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_BOT: ${{ secrets.TELEGRAM_BOT }}
+        run: |
+          for N in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BRAPI_TOKEN TELEGRAM_TOKEN TELEGRAM_BOT; do
+            V="${!N}"
+            if [ -n "$V" ]; then printf '%s' "${V#@}" | npx --yes wrangler@4 secret put "$N" >/dev/null && echo "$N guardado"; else echo "::warning::Segredo $N vazio no GitHub."; fi
+          done
+      - name: Ligar o robô do Telegram e conferir
+        if: steps.tem.outputs.ok == 'true'
+        env:
+          IA_PROXY_URL: ${{ secrets.IA_PROXY_URL }}
+          IA_PROXY_TOKEN: ${{ secrets.IA_PROXY_TOKEN }}
+        run: |
+          sleep 15
+          curl -fsS "$IA_PROXY_URL/saude"; echo
+          curl -sS -X POST -H "x-app-token: $IA_PROXY_TOKEN" "$IA_PROXY_URL/nuvem/configurar-telegram"; echo

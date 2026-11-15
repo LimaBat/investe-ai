@@ -3774,6 +3774,40 @@ def api_notificar_permissao():
             log("permissão de notificação: " + repr(e))
     return {"ok": True}
 
+
+# ---- reajuste na nuvem: liga, desliga e consulta (o intermediário confere a carteira mesmo com o app fechado)
+def api_nuvem(rota):
+    u = usuario_atual()
+    gu = (u or {}).get("google") or {}
+    if not gu.get("refresh"):
+        return {"erro": "Entre com o Google (aba Conta) para usar o reajuste na nuvem."}
+    if not gu.get("drive"):
+        return {"erro": "O Google não deu permissão ao Drive. Saia e entre com o Google de novo, marcando a opção do Google Drive."}
+    if not IA_PROXY_URL:
+        return {"erro": "Esta versão do app não tem o servidor da nuvem configurado."}
+    try:
+        r = requests.post(IA_PROXY_URL.rstrip("/") + "/nuvem/" + rota, json={"rt": gu["refresh"]},
+                          headers={"x-app-token": IA_PROXY_TOKEN or "", "x-app-versao": VERSAO}, timeout=90 if rota == "conferir" else 30)
+        j = r.json()
+    except Exception as e:
+        log("nuvem " + rota + ": " + repr(e))
+        return {"erro": "Não consegui falar com o servidor da nuvem agora."}
+    if r.status_code == 503:
+        return {"erro": "O reajuste na nuvem ainda não foi configurado no servidor.", "sem_servidor": True}
+    return j if isinstance(j, dict) else {"erro": "Resposta inválida do servidor."}
+
+
+def api_abrir_link(d):
+    """Abre no navegador do computador um link permitido (robô do Telegram)."""
+    url = str((d or {}).get("url") or "")
+    if not re.match(r"^https://t\.me/[A-Za-z0-9_]{3,40}(\?start=[0-9a-f]{8,40})?$", url):
+        return {"erro": "Link não permitido."}
+    try:
+        webbrowser.open(url)
+        return {"ok": True}
+    except Exception:
+        return {"erro": "Não consegui abrir o navegador."}
+
 # ---------------------------------------------------------------- ciclo de vida (fecha ao fechar a janela)
 estado = {"ultimo_ping": time.time(), "visto": False, "bye": None}
 
@@ -3862,6 +3896,11 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/ia/questoes": lambda: api_ia_questoes(d),
                 "/api/notificar": lambda: api_notificar(d),
                 "/api/notificar/permissao": lambda: api_notificar_permissao(),
+                "/api/nuvem/estado": lambda: api_nuvem("estado"),
+                "/api/nuvem/ativar": lambda: api_nuvem("ativar"),
+                "/api/nuvem/desativar": lambda: api_nuvem("desativar"),
+                "/api/nuvem/conferir": lambda: api_nuvem("conferir"),
+                "/api/abrir-link": lambda: api_abrir_link(d),
                 "/api/eventos": lambda: api_eventos(d),
                 "/api/rf/valor": lambda: api_rf_valor(d),
                 "/api/carteira/rent": lambda: api_carteira_rent(d),
@@ -4646,6 +4685,7 @@ canvas.gp{cursor:crosshair}
 .rj-modo.on b::before{content:'';display:inline-block;width:9px;height:9px;border-radius:9px;background:var(--accent);margin-right:8px;vertical-align:1px}
 .rj-agora-modo{margin:10px 0 0}
 @media(max-width:760px){.rj-modos{grid-template-columns:1fr}}
+.nv-tg{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}.rj-c .pill.nv{margin-left:6px}
 
 </style>
 </head>
@@ -8034,7 +8074,7 @@ async function rjDicas(E,P){
   const q='Você é o assistente de carteira do Investe.AI, um simulador educativo. Com os dados abaixo e o cenário de mercado de hoje, dê de 3 a 4 dicas curtas e práticas sobre a carteira (uma frase cada, numeradas), incluindo se o reajuste calculado faz sentido agora. Não prometa retorno e não use emojis.\n\n'+rjContexto(E,P);
   try{const j=await apiPost('/api/ia',{mensagens:[{role:'user',content:q}],pesquisar:true});return j&&j.resposta?String(j.resposta).trim().slice(0,1500):'';}catch(e){return '';}}
 const rjNotifica=(titulo,texto)=>apiPost('/api/notificar',{titulo,texto}).catch(()=>{});
-async function rjVerifica(manual){const cfg=rjCfg();if((!cfg.on&&!manual)||RJ.rodando)return;
+async function rjVerifica(manual){const cfg=rjCfg();if((!cfg.on&&!manual)||RJ.rodando)return;if(!manual&&cfg.nuvem)return;
   if(!manual&&Date.now()-LS.g('rj_ult',0)<RJ_FREQ[cfg.freq][0])return;
   INV.calc=null;const c0=invCalc();if(!c0.linhas.length&&!(c0.rfL||[]).length&&!(c0.caixa>0))return;
   RJ.rodando=true;rjRender();
@@ -8070,13 +8110,15 @@ function rjRender(){const h=$('#inv-rj');if(!h||h.style.display==='none')return;
     <div class="tb2" style="margin:14px 0 0;align-items:center"><button class="btn sm" type="button" id="rj-agora"${RJ.rodando?' disabled':''}>${RJ.rodando?'Conferindo a carteira…':'Conferir agora'}</button>
       <button class="btn ghost sm" type="button" id="rj-perfil">Mudar o perfil</button><button class="btn ghost sm" type="button" id="rj-teste">Testar notificação</button>
       <span class="sub" style="font-size:12.5px">${ult?'Última conferência: '+new Date(ult).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'Ainda não conferida'}${prox?' · próxima: '+prox.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):''}</span></div>
-    <p class="sub" style="font-size:12px;margin-top:10px">A conferência acontece com o Investe.AI aberto (no celular, ao abrir ou voltar ao app). No modo "Mexer na carteira sozinho", as ordens são executadas só no simulador, com dinheiro fictício. Da renda fixa, só o Tesouro Selic e CDBs de liquidez diária podem ser resgatados no reajuste; títulos com vencimento ficam como estão.</p></div>
+    <p class="sub" style="font-size:12px;margin-top:10px">${cfg.nuvem?'Com a nuvem ativa (quadro abaixo), quem confere no horário é o servidor, mesmo com o app fechado.':'A conferência acontece com o Investe.AI aberto (no celular, ao abrir ou voltar ao app). Para funcionar com o app fechado, ative a nuvem no quadro abaixo.'} No modo "Mexer na carteira sozinho", as ordens são executadas só no simulador, com dinheiro fictício. Da renda fixa, só o Tesouro Selic e CDBs de liquidez diária podem ser resgatados no reajuste; títulos com vencimento ficam como estão.</p></div>
+  <div class="card mt" id="rj-nuvem"></div>
   <div id="rj-hist">${Hs.length?Hs.map((x,i)=>rjCartao(x,i===0)).join(''):'<div class="card mt"><p class="sub">Nenhuma conferência ainda. Toque em <b>Conferir agora</b> para ver como está a sua carteira.</p></div>'}</div>`;
   const salva=(modo)=>{LS.s('rj_cfg',{on:$('#rj-on').checked,modo:modo||rjCfg().modo,freq:$('#rj-freq').value,tol:+$('#rj-tol').value,caixa:$('#rj-caixa').checked,ia:$('#rj-ia').checked,notif:$('#rj-notif').checked});if(typeof agendaSync==='function')agendaSync();rjRender();};
   $$('#inv-rj [data-rjm]').forEach(b=>b.onclick=()=>{const m=b.dataset.rjm;if(m===rjCfg().modo)return;
     if(m==='auto'&&!confirm('Com esta opção, o Investe.AI vai comprar e vender ativos na sua carteira simulada sozinho, sempre que ela sair do perfil. Continuar?'))return;
     salva(m);toast(m==='auto'?'O reajuste agora mexe na carteira sozinho.':'O reajuste agora só sugere.');});
   ['rj-on','rj-freq','rj-tol','rj-caixa','rj-ia','rj-notif'].forEach(id=>$('#'+id).onchange=()=>{salva();if(id==='rj-on'&&$('#rj-on').checked){apiPost('/api/notificar/permissao',{}).catch(()=>{});if(!LS.g('rj_ult',0))rjVerifica(true);}});
+  rjNuvemRender();
   $('#rj-agora').onclick=()=>rjVerifica(true);$('#rj-perfil').onclick=()=>ir('carteira');
   $('#rj-teste').onclick=()=>{apiPost('/api/notificar/permissao',{}).catch(()=>{});rjNotifica('Investe.AI','As notificações de reajuste da carteira estão funcionando.').then(j=>toast(j&&j.ok?'Notificação enviada.':'Este aparelho não aceitou a notificação.'));};
   $$('#rj-hist [data-rjx]').forEach(b=>b.onclick=async()=>{const x=Hs.find(z=>z.id===b.dataset.rjx);if(!x)return;b.disabled=true;b.textContent='Executando…';
@@ -8086,7 +8128,7 @@ function rjRender(){const h=$('#inv-rj');if(!h||h.style.display==='none')return;
 function rjCartao(x,prim){const d=new Date(x.ts).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}),ord=[].concat((x.resg||[]).map(o=>`<li><b class="neg">Resgatar</b> ${din(o[1])} de ${esc(o[0])}</li>`),x.vend.map(o=>`<li><b class="neg">Vender</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.comp.map(o=>`<li><b class="pos">Comprar</b> ${fmtQ(o[1])} ${esc(o[0])} a ${din(o[2])}</li>`),x.apl.map(a=>`<li><b class="pos">Aplicar</b> ${din(a[1])} em ${esc(a[0])}</li>`));
   const barras=(x.cur||[]).map((v,i)=>`<div class="rj-b"><span>${esc(CT_CLS[i].n)}</span><div class="rj-t"><i style="width:${Math.min(100,v)}%;background:${CT_CLS[i].c}"></i><em style="left:${x.alvo[i]}%"></em></div><b>${fmt(v,0,'%')} <small>alvo ${x.alvo[i]}%</small></b></div>`).join('');
   return `<div class="card mt rj-c"><div class="head" style="align-items:flex-start;margin-bottom:6px"><div><div class="eyebrow">${esc(d)}</div><h3 style="margin:4px 0">${esc(x.resumo)}</h3></div>
-    <span class="pill ${x.exec?'':x.dispara?'warn':''}">${x.exec?'Executado':x.dispara?'Reajuste sugerido':'Equilibrada'}</span></div>
+    <span>${x.nuvem?'<span class="pill">Na nuvem</span> ':''}<span class="pill ${x.exec?'':x.dispara?'warn':''}">${x.exec?'Executado':x.dispara?'Reajuste sugerido':'Equilibrada'}</span></span></div>
     <details${prim?' open':''}><summary class="sub">Ver detalhes</summary><div class="rj-bars">${barras}</div>
     ${ord.length?`<h4 style="margin:12px 0 4px">${x.exec?'Ordens executadas':'Ordens sugeridas'}</h4><ul class="ap-ul">${ord.join('')}</ul>`:''}
     ${(x.av||[]).length?`<ul class="ap-ul" style="color:var(--warn)">${x.av.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`:''}
@@ -8096,6 +8138,41 @@ function rjCartao(x,prim){const d=new Date(x.ts).toLocaleString('pt-BR',{dateSty
 /* confere ao abrir o app, ao voltar para ele e a cada 30 minutos */
 setTimeout(()=>rjVerifica(false),20000);setInterval(()=>{if(document.visibilityState==='visible')rjVerifica(false);},30*60e3);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(()=>rjVerifica(false),4000);});
+
+/* ---------- reajuste na nuvem: funciona com o app fechado e até sem ninguém logado; avisos pelo Telegram ---------- */
+RJ.nv=null;RJ.nvT=0;RJ.nvOcup=false;
+async function rjNuvemEstado(forcar){if(!forcar&&RJ.nv&&Date.now()-RJ.nvT<60000)return RJ.nv;
+  try{RJ.nv=await apiPost('/api/nuvem/estado',{});}catch(e){RJ.nv={erro:'Não consegui falar com o servidor da nuvem agora.'};}RJ.nvT=Date.now();
+  const cfg=rjCfg();if(RJ.nv&&!RJ.nv.erro&&!!RJ.nv.ativo!==!!cfg.nuvem){LS.s('rj_cfg',Object.assign(cfg,{nuvem:!!RJ.nv.ativo}));if(typeof agendaSync==='function')agendaSync();}
+  return RJ.nv;}
+async function rjNuvemRender(){const h=$('#rj-nuvem');if(!h)return;const dt=t=>t?new Date(t).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'';
+  const topo=`<div class="head" style="align-items:flex-start;margin-bottom:6px"><div><div class="eyebrow">Na nuvem</div><h2 style="margin:4px 0">Funcionar com o app fechado</h2>
+    <p class="sub" style="max-width:760px">O servidor do Investe.AI confere e reajusta a sua carteira na frequência escolhida acima, mesmo com o app fechado e até se você sair da conta em todos os aparelhos. Os avisos chegam pelo Telegram. Quando você abrir o app, a carteira já vem atualizada.</p></div></div>`;
+  if(!USR.logado||!USR.usuario||!USR.usuario.google){h.innerHTML=topo+`<p class="sub">Para usar, entre com o Google na aba <b>Conta</b>: a carteira fica guardada no seu Google Drive e é de lá que o servidor a confere.</p><div class="tb2" style="margin:10px 0 0"><button class="btn sm" type="button" id="nv-conta">Entrar com o Google</button></div>`;
+    $('#nv-conta').onclick=()=>ir('conta');return;}
+  if(!RJ.nv)h.innerHTML=topo+'<p class="sub">Consultando o servidor…</p>';
+  const e=await rjNuvemEstado(false);if(!$('#rj-nuvem'))return;
+  if(e.erro&&!e.ativo){h.innerHTML=topo+`<p class="sub">${esc(e.erro)}</p>`+(e.sem_servidor?'':`<div class="tb2" style="margin:10px 0 0"><button class="btn ghost sm" type="button" id="nv-tenta">Tentar de novo</button></div>`);const b=$('#nv-tenta');if(b)b.onclick=()=>{RJ.nv=null;rjNuvemRender();};return;}
+  const cfg=rjCfg(),oc=RJ.nvOcup?' disabled':'';
+  if(!e.ativo){h.innerHTML=topo+`<ul class="ap-ul"><li>A autorização do Google fica guardada no servidor de forma criptografada e só é usada para ler e gravar a carteira na pasta do app no seu Drive.</li><li>Você pode desligar quando quiser; aí o servidor apaga a autorização.</li>${cfg.on?'':'<li><b>Marque "Ativado" acima</b> para o servidor conferir na frequência escolhida.</li>'}</ul>
+      <div class="tb2" style="margin:12px 0 0"><button class="btn sm" type="button" id="nv-on"${oc}>${RJ.nvOcup?'Ativando…':'Ativar na nuvem'}</button></div>`;
+    $('#nv-on').onclick=async()=>{RJ.nvOcup=true;rjNuvemRender();try{const j=await apiPost('/api/nuvem/ativar',{});if(j.erro)throw new Error(j.erro);RJ.nv=j;RJ.nvT=Date.now();
+      LS.s('rj_cfg',Object.assign(rjCfg(),{nuvem:true}));if(typeof agendaSync==='function')agendaSync();toast('Reajuste na nuvem ativado.');}catch(x){toast(x.message);}finally{RJ.nvOcup=false;rjRender();}};return;}
+  h.innerHTML=topo+`<p class="sub"><b class="pos">Ativo na nuvem.</b> ${cfg.on?(cfg.modo==='auto'?'O servidor mexe na carteira sozinho quando ela sair do perfil.':'O servidor só sugere; a carteira não muda sem você.'):'<b class="warn">Marque "Ativado" acima</b> para o servidor conferir.'}
+      ${e.ult?`<br>Última conferência na nuvem: ${dt(e.ult)}${e.res?' · '+esc(e.res):''}`:''}${e.prox?`<br>Próxima: ${dt(e.prox)} (o servidor confere a cada 15 minutos quem está na hora).`:''}${e.erro?`<br><span class="neg">${esc(e.erro)}</span>`:''}</p>
+    <div class="nv-tg">${e.telegram?'<span class="pill">Avisos no Telegram ligados</span><span class="sub">Para parar, envie /parar para o robô.</span>':(e.link?`<button class="btn sm" type="button" id="nv-tg" data-l="${esc(e.link)}">Receber avisos no Telegram</button><span class="sub">Abre o robô <b>@${esc(e.bot)}</b>; toque em <b>Iniciar</b>. Depois volte aqui.</span>`:'<span class="sub">Os avisos pelo Telegram ainda não foram configurados no servidor.</span>')}</div>
+    <div class="tb2" style="margin:12px 0 0"><button class="btn ghost sm" type="button" id="nv-conf"${oc}>${RJ.nvOcup?'Conferindo na nuvem…':'Conferir agora na nuvem'}</button><button class="btn ghost sm" type="button" id="nv-att">Atualizar</button><button class="btn ghost sm" type="button" id="nv-off"${oc}>Desativar a nuvem</button></div>`;
+  const tg=$('#nv-tg');if(tg)tg.onclick=async()=>{const l=tg.dataset.l;
+    if(typeof EH_ANDROID!=='undefined'&&EH_ANDROID)location.href=l;else{let ok=false;try{ok=(await apiPost('/api/abrir-link',{url:l})).ok;}catch(x){}if(!ok)window.open(l,'_blank');}
+    setTimeout(()=>{RJ.nv=null;rjNuvemRender();},15000);};
+  $('#nv-att').onclick=()=>{RJ.nv=null;rjNuvemRender();};
+  $('#nv-conf').onclick=async()=>{RJ.nvOcup=true;rjNuvemRender();try{await empurraJa();const j=await apiPost('/api/nuvem/conferir',{});if(j.erro)throw new Error(j.erro);RJ.nv=j;RJ.nvT=Date.now();toast(j.resumo||'Conferido na nuvem.');
+      setTimeout(()=>{try{sincConta(true);}catch(x){}},1500);}catch(x){toast(x.message);}finally{RJ.nvOcup=false;rjRender();}};
+  $('#nv-off').onclick=async()=>{if(!confirm('Desativar o reajuste na nuvem? O servidor apaga a autorização do Google e para de conferir com o app fechado.'))return;RJ.nvOcup=true;rjNuvemRender();
+    try{const j=await apiPost('/api/nuvem/desativar',{});if(j.erro)throw new Error(j.erro);RJ.nv=j;RJ.nvT=Date.now();LS.s('rj_cfg',Object.assign(rjCfg(),{nuvem:false}));if(typeof agendaSync==='function')agendaSync();toast('Reajuste na nuvem desativado.');}
+    catch(x){toast(x.message);}finally{RJ.nvOcup=false;rjRender();}};}
+/* antes de conferir na nuvem, garante que o que mudou aqui já foi para o Drive */
+async function empurraJa(){try{if(typeof syncT!=='undefined'&&syncT){clearTimeout(syncT);syncT=null;await empurra();}await apiPost('/api/sincronizar',{});}catch(e){}}
 
 </script>
 </body>

@@ -1,6 +1,8 @@
 // Intermediário de IA do Investe.AI (Cloudflare Workers, plano gratuito).
 // O programa manda a pergunta para cá; só este servidor conhece as chaves do Groq e do Gemini.
 // Segredos (wrangler secret put ...): GROQ_KEY, GEMINI_KEY (opcional, reserva e pesquisa no Google), APP_TOKEN (opcional).
+// Reajuste na nuvem (nuvem.js): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BRAPI_TOKEN (opcional), TELEGRAM_TOKEN e TELEGRAM_BOT (opcionais).
+import { nuvemRotas, nuvemAgendado } from "./nuvem.js";
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type,x-app-token,x-app-versao", "Access-Control-Allow-Methods": "POST,GET,OPTIONS" };
 const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json; charset=utf-8", ...CORS } });
 const GEMINI_MODELOS = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"];
@@ -43,7 +45,8 @@ export default {
   async fetch(req, env) {
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
     const url = new URL(req.url);
-    if (url.pathname === "/saude") return json({ ok: true, groq: !!env.GROQ_KEY, gemini: !!env.GEMINI_KEY });
+    if (url.pathname === "/saude") return json({ ok: true, groq: !!env.GROQ_KEY, gemini: !!env.GEMINI_KEY, nuvem: !!(env.NUVEM && env.GOOGLE_CLIENT_SECRET), telegram: !!env.TELEGRAM_TOKEN });
+    if (url.pathname.startsWith("/nuvem/") || url.pathname.startsWith("/tg/")) return nuvemRotas(req, env, url, { json, groq });
     if (url.pathname !== "/chat" || req.method !== "POST") return json({ erro: "Não encontrado." }, 404);
     if (env.APP_TOKEN && req.headers.get("x-app-token") !== env.APP_TOKEN) return json({ erro: "Acesso negado." }, 403);
     if (env.LIMITE) {  // limite por pessoa (endereço de internet), definido no wrangler.toml
@@ -69,5 +72,9 @@ export default {
       }
       return json({ erro: "A IA não respondeu agora. Tente de novo em instantes." }, 502);
     }
+  },
+  // reajuste da carteira na nuvem: roda sozinho a cada 15 minutos (ver [triggers] no wrangler.toml)
+  async scheduled(ev, env, ctx) {
+    ctx.waitUntil(nuvemAgendado(env, { groq }));
   },
 };

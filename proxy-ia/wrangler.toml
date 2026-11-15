@@ -13,3 +13,12 @@ namespace_id = "1001"
   [ratelimits.simple]
   limit = 20
   period = 60
+
+# Reajuste da carteira na nuvem: onde ficam as inscrições (o GitHub Actions cria e preenche o id sozinho)
+[[kv_namespaces]]
+binding = "NUVEM"
+id = "__NUVEM_KV_ID__"
+
+# Confere uma carteira a cada 15 minutos (só as que estão na hora da conferência)
+[triggers]
+crons = ["*/15 * * * *"]
