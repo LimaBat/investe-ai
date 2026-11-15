@@ -15,7 +15,7 @@ async function iniciar(proxy, versao) {
   importScripts(PYODIDE + "pyodide.js");
   py = await loadPyodide({ indexURL: PYODIDE });
   progresso(30, "Baixando os componentes");
-  await py.loadPackage(["micropip", "numpy", "pandas", "requests"]);
+  await py.loadPackage(["micropip", "numpy", "pandas", "requests", "sqlite3", "ssl"]);
   progresso(55, "Instalando as bibliotecas de mercado");
   const micropip = py.pyimport("micropip");
   await micropip.install(["beautifulsoup4", "pytz", "python-dateutil", "platformdirs", "multitasking", "frozendict", "websockets", "protobuf", "tzdata"]);
