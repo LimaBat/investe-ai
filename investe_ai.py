@@ -7,6 +7,7 @@ import os, sys, subprocess
 
 CONGELADO = bool(getattr(sys, "frozen", False))  # True no .exe / app gerado pelo PyInstaller
 ANDROID = bool(os.environ.get("INVESTEAI_ANDROID"))  # rodando dentro do app Android (Chaquopy)
+WEB = bool(os.environ.get("INVESTEAI_WEB"))  # rodando no navegador (Pyodide, docs/app)
 ARQ_PROG = os.path.abspath(sys.executable if CONGELADO else __file__)
 _AQUI = os.path.dirname(ARQ_PROG)
 
@@ -1039,6 +1040,7 @@ def _instancia_aberta():
 
 
 def _iniciar_splash():
+    if WEB: return  # no navegador a tela de carregamento é a da própria página
     if "--nova" not in sys.argv:
         url = _instancia_aberta()
         if url:
@@ -3043,7 +3045,7 @@ def _nome_pacote():
 
 
 def api_atualizacao(forcar=False):
-    if not ATUALIZA_REPO: return {"ativo": False, "atual": VERSAO}
+    if WEB or not ATUALIZA_REPO: return {"ativo": False, "atual": VERSAO}  # no navegador a página já é sempre a mais nova
     if not forcar and ATUALIZA["info"] and time.time() - ATUALIZA["t"] < 3 * 3600: return ATUALIZA["info"]
     try:
         r = requests.get(f"https://api.github.com/repos/{ATUALIZA_REPO}/releases/latest", timeout=12,
@@ -3750,6 +3752,7 @@ def api_notificar(d):
     titulo = re.sub(r"\s+", " ", str((d or {}).get("titulo") or "Investe.AI")).strip()[:80]
     texto = re.sub(r"\s+", " ", str((d or {}).get("texto") or "")).strip()[:300]
     if not texto: return {"erro": "Sem texto."}
+    if WEB: return {"ok": False, "web": True}  # no navegador quem mostra é a própria página
     try:
         if ANDROID:
             import investe_android
@@ -3777,6 +3780,8 @@ def api_notificar_permissao():
 
 # ---- reajuste na nuvem: liga, desliga e consulta (o intermediário confere a carteira mesmo com o app fechado)
 def api_nuvem(rota):
+    if WEB:
+        return {"erro": "O reajuste na nuvem usa a sua conta Google: ative pelo app de computador ou de celular. Depois ele funciona mesmo com tudo fechado."}
     u = usuario_atual()
     gu = (u or {}).get("google") or {}
     if not gu.get("refresh"):
@@ -4686,6 +4691,7 @@ canvas.gp{cursor:crosshair}
 .rj-agora-modo{margin:10px 0 0}
 @media(max-width:760px){.rj-modos{grid-template-columns:1fr}}
 .nv-tg{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}.rj-c .pill.nv{margin-left:6px}
+html.web #usr-g{display:none!important}
 
 </style>
 </head>
@@ -6646,8 +6652,8 @@ async function usrRender(){
       <form id="usr-form" class="grid" style="gap:12px;max-width:420px"><label class="fl" id="usr-ln" style="display:none"><span>Nome</span><input id="usr-nome" autocomplete="name" maxlength="60"></label>
         <label class="fl"><span>E-mail</span><input id="usr-email" type="email" autocomplete="email" required></label><label class="fl"><span>Senha (mínimo 6 caracteres)</span><input id="usr-senha" type="password" autocomplete="current-password" required></label>
         <div id="usr-err"></div><button class="btn" type="submit" style="padding:13px" id="usr-ok">Entrar</button></form>
-      <div class="sub" style="margin:14px 0 8px">ou</div><button class="btn ghost" id="usr-g" style="padding:12px 20px"><svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:-3px;margin-right:8px"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Continuar com Google</button>
-      <p class="sub mt" style="font-size:12.5px">${USR.google_configurado?'Abre o login do Google no seu navegador.':'Para usar o Google, configure o acesso na seção “Google” abaixo (uma vez só).'}</p></div>`;
+      ${window.__WEB__?'':'<div class="sub" style="margin:14px 0 8px">ou</div>'}<button class="btn ghost" id="usr-g" style="padding:12px 20px"><svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:-3px;margin-right:8px"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Continuar com Google</button>
+      <p class="sub mt" style="font-size:12.5px">${window.__WEB__?'Na versão para navegador, entre com e-mail e senha: os dados ficam salvos neste navegador. Para entrar com o Google e sincronizar com outros aparelhos, use o app de computador ou de celular.':USR.google_configurado?'Abre o login do Google no seu navegador.':'Para usar o Google, configure o acesso na seção “Google” abaixo (uma vez só).'}</p></div>`;
   /* ativos por categoria */
   const todos=[...new Set([...FAVS,...ATIVOS,...PL.itens.map(i=>i.t).filter(t=>!PL_RF.has(t))])].slice(0,20);
   const cot={};try{if(todos.length){(await api('/api/cotacoes?tickers='+encodeURIComponent(todos.join(',')))).itens.forEach(r=>cot[r.ticker]=r);}}catch(e){}
@@ -6667,7 +6673,7 @@ async function usrRender(){
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn sm" id="ia-salva">Salvar</button><button class="btn ghost sm" id="ia-teste">Testar conexão</button>${ia.tem_chave?'<button class="btn ghost sm" id="ia-rm">Remover chave</button>':''}<span id="ia-st" class="sub" style="align-self:center"></span></div></div>`;
   const somHtml=`<div class="card mt"><h2>Sons</h2><label class="ck"><input type="checkbox" id="som-on" ${sfx.cfg.on?'checked':''}>Sons nas interações (cliques, navegação, acertos e avisos)</label>
     <div class="lbl">Volume</div><input class="rng" id="som-vol" type="range" min="0" max="100" value="${Math.round(sfx.cfg.vol*100)}"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${[['click','Clique'],['nav','Navegar'],['ok','Sucesso'],['err','Erro'],['nivel','Nível']].map(([k,n])=>`<button class="chip" data-s="${k}">${n}</button>`).join('')}</div></div>`;
-  const gHtml=`<div class="card mt"><details ${USR.google_configurado?'':'open'}><summary style="cursor:pointer;font-weight:600">Google: login e backup no Drive ${USR.google_configurado?'<span class="pill" style="color:var(--good);border-color:var(--good)">configurado</span>':''}</summary>
+  const gHtml=window.__WEB__?'':`<div class="card mt"><details ${USR.google_configurado?'':'open'}><summary style="cursor:pointer;font-weight:600">Google: login e backup no Drive ${USR.google_configurado?'<span class="pill" style="color:var(--good);border-color:var(--good)">configurado</span>':''}</summary>
     <ol class="sub" style="margin:12px 0 0 18px;line-height:1.7"><li>Acesse <b>console.cloud.google.com</b>, crie um projeto e ative a <b>Google Drive API</b>.</li><li>Em <b>Tela de consentimento OAuth</b>, configure o app (tipo Externo) e adicione o seu e-mail como usuário de teste.</li><li>Em <b>Credenciais</b>, crie um <b>ID do cliente OAuth</b> do tipo <b>App para computador</b>.</li><li>Cole abaixo o ID e o segredo do cliente. O login abre no seu navegador e o backup fica numa pasta oculta do app no seu Drive.</li></ol>
     <div class="ff mt" style="grid-template-columns:1fr 1fr"><label class="fl"><span>ID do cliente</span><input id="g-id" value="${esc(gc.client_id)}" autocomplete="off"></label><label class="fl"><span>Segredo do cliente ${gc.tem_secret?'<small style="color:var(--good)">(salvo)</small>':''}</span><input id="g-sec" type="password" autocomplete="off" placeholder="${gc.tem_secret?'•••••••• (vazio = manter)':''}"></label></div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn sm" id="g-salva">Salvar</button>${USR.logado&&u.google?'<button class="btn ghost sm" id="g-desv">Desvincular Google</button>':''}<span id="g-st" class="sub" style="align-self:center"></span></div></details></div>`;
@@ -8073,7 +8079,10 @@ function rjContexto(E,P){const pct=v=>fmt(v,1,'%');
 async function rjDicas(E,P){
   const q='Você é o assistente de carteira do Investe.AI, um simulador educativo. Com os dados abaixo e o cenário de mercado de hoje, dê de 3 a 4 dicas curtas e práticas sobre a carteira (uma frase cada, numeradas), incluindo se o reajuste calculado faz sentido agora. Não prometa retorno e não use emojis.\n\n'+rjContexto(E,P);
   try{const j=await apiPost('/api/ia',{mensagens:[{role:'user',content:q}],pesquisar:true});return j&&j.resposta?String(j.resposta).trim().slice(0,1500):'';}catch(e){return '';}}
-const rjNotifica=(titulo,texto)=>apiPost('/api/notificar',{titulo,texto}).catch(()=>{});
+const rjNotifica=async(titulo,texto)=>{
+  if(window.__WEB__){try{if(!('Notification' in window))return {ok:false};let p=Notification.permission;if(p==='default')p=await Notification.requestPermission();
+    if(p!=='granted')return {ok:false};new Notification(titulo,{body:texto,icon:'../icone.png'});return {ok:true};}catch(e){return {ok:false};}}
+  return apiPost('/api/notificar',{titulo,texto}).catch(()=>({ok:false}));};
 async function rjVerifica(manual){const cfg=rjCfg();if((!cfg.on&&!manual)||RJ.rodando)return;if(!manual&&cfg.nuvem)return;
   if(!manual&&Date.now()-LS.g('rj_ult',0)<RJ_FREQ[cfg.freq][0])return;
   INV.calc=null;const c0=invCalc();if(!c0.linhas.length&&!(c0.rfL||[]).length&&!(c0.caixa>0))return;
@@ -8173,6 +8182,9 @@ async function rjNuvemRender(){const h=$('#rj-nuvem');if(!h)return;const dt=t=>t
     catch(x){toast(x.message);}finally{RJ.nvOcup=false;rjRender();}};}
 /* antes de conferir na nuvem, garante que o que mudou aqui já foi para o Drive */
 async function empurraJa(){try{if(typeof syncT!=='undefined'&&syncT){clearTimeout(syncT);syncT=null;await empurra();}await apiPost('/api/sincronizar',{});}catch(e){}}
+
+/* versão para navegador */
+if(window.__WEB__){document.documentElement.classList.add('web');}
 
 </script>
 </body>

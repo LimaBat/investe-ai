@@ -11,3 +11,6 @@ h1{font-size:clamp(28px,5vw,40px);line-height:1.15;margin:10px 0 14px}h2{font-si
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}.card b{display:block;margin-bottom:4px}
 footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}footer a{margin-right:14px}
 li{margin:4px 0}
+
+.btn.web{background:transparent;border:1.5px solid #5eead4;color:#5eead4}.btn.web:hover{background:rgba(94,234,212,.1)}
+.nota-web{font-size:13px;opacity:.75;margin:8px 0 0}
