@@ -160,6 +160,16 @@ def _preparar_yfinance(pasta):
     for nome, base in (("DNSError", requests.exceptions.ConnectionError), ("CertificateVerifyError", requests.exceptions.SSLError),
                        ("IncompleteRead", requests.exceptions.ChunkedEncodingError)):
         if not hasattr(requests.exceptions, nome): setattr(requests.exceptions, nome, base)
+    try:  # o yfinance usa websockets só para cotações ao vivo, que o programa não usa; no navegador fica um substituto
+        import yfinance.live  # noqa: F401
+    except Exception as e:
+        print("yfinance.live indisponível no navegador:", repr(e)[:200])
+        for k in [k for k in sys.modules if k == "yfinance" or k.startswith("yfinance.")]: del sys.modules[k]
+        falso = types.ModuleType("yfinance.live")
+        class _SemAoVivo:
+            def __init__(self, *a, **k): raise RuntimeError("cotação ao vivo não disponível no navegador")
+        falso.WebSocket = falso.AsyncWebSocket = _SemAoVivo
+        sys.modules["yfinance.live"] = falso
     import yfinance
     import yfinance._http as h
     h._backend = types.SimpleNamespace(Session=SessaoWeb, exceptions=requests.exceptions)

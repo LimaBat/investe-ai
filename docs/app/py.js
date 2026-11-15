@@ -46,7 +46,7 @@ onmessage = async ev => {
   const m = ev.data || {};
   if (m.tipo === "iniciar") {
     try { await iniciar(m.proxy, m.versao); }
-    catch (e) { postMessage({ tipo: "falha", msg: String(e && e.message || e).slice(0, 600) }); }
+    catch (e) { const t = String(e && e.message || e); console.log(t); postMessage({ tipo: "falha", msg: t.length > 900 ? t.slice(0, 200) + " … " + t.slice(-700) : t }); }
     return;
   }
   if (m.tipo === "pedido") {
