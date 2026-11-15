@@ -29,6 +29,12 @@ jobs:
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
+            # tolera o segredo colado com espaços, aspas, "Bearer" ou o comando curl inteiro: fica só o token
+            T=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '\r' | grep -oE '[A-Za-z0-9_-]{30,}' | tail -1 || true)
+            A=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | grep -oE '[0-9a-fA-F]{32}' | head -1 || true)
+            echo "token: ${#T} caracteres, começa com ${T:0:5}; conta: ${#A} caracteres"
+            if [ -n "$T" ]; then echo "::add-mask::$T"; echo "CLOUDFLARE_API_TOKEN=$T" >> "$GITHUB_ENV"; fi
+            if [ -n "$A" ]; then echo "CLOUDFLARE_ACCOUNT_ID=$A" >> "$GITHUB_ENV"; fi
           fi
       - uses: actions/setup-node@v4
         if: steps.tem.outputs.ok == 'true'
