@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  pages: write
 concurrency:
   group: web-${{ github.event_name }}
   cancel-in-progress: false
@@ -60,6 +61,7 @@ jobs:
         env:
           VERSAO: ${{ github.event.release.tag_name }}
           IA_PROXY_URL: ${{ secrets.IA_PROXY_URL }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           printf '// gerado pela publicação\nwindow.INVESTEAI_PROXY = "%s";\nwindow.INVESTEAI_VERSAO = "%s";\n' "${IA_PROXY_URL%/}" "${VERSAO#v}" > docs/app/config.js
           git config user.name "github-actions[bot]"
@@ -68,3 +70,4 @@ jobs:
           git commit -m "Versão para navegador ${VERSAO}" || echo "nada mudou"
           git pull --rebase -q origin main
           git push origin HEAD:main
+          gh api -X POST "repos/${{ github.repository }}/pages/builds" >/dev/null || echo "o site atualiza sozinho em alguns minutos"
