@@ -38,6 +38,13 @@ jobs:
         if: steps.tem.outputs.ok == 'true'
         working-directory: proxy-ia
         run: |
+          set -eo pipefail
+          V=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify)
+          echo "token da Cloudflare: $(echo "$V" | jq -c '{ok: .success, status: .result.status, erros: [.errors[]?.message]}')"
+          if [ "$(echo "$V" | jq -r .success)" != "true" ]; then echo "::error::O CLOUDFLARE_API_TOKEN não foi aceito pela Cloudflare. Gere um token novo e cole de novo no segredo do GitHub."; exit 1; fi
+          C=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID")
+          echo "conta: $(echo "$C" | jq -c '{ok: .success, erros: [.errors[]?.message]}')"
+          if [ "$(echo "$C" | jq -r .success)" != "true" ]; then echo "::error::O CLOUDFLARE_ACCOUNT_ID está errado ou o token não tem acesso a essa conta."; exit 1; fi
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
           ID=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API?per_page=100" | jq -r '.result[] | select(.title=="investe-ai-nuvem") | .id' | head -1)
           if [ -z "$ID" ]; then
