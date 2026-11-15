@@ -1,3 +1,3 @@
-// preenchido pela publicação (GitHub Actions): endereço do intermediário e versão
-window.INVESTEAI_PROXY = "";
-window.INVESTEAI_VERSAO = "dev";
+// gerado pela publicação
+window.INVESTEAI_PROXY = "https://investe-ai-ia.limabat-investeai.workers.dev";
+window.INVESTEAI_VERSAO = "3.17";
