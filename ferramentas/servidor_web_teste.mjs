@@ -27,6 +27,7 @@ http.createServer(async (req, res) => {
     const r = await worker.fetch(new Request("http://127.0.0.1:8788" + req.url, { method: req.method, headers: h, body: corpo }), {}, { waitUntil() { } });
     const cab = {}; r.headers.forEach((v, k) => { cab[k] = v; });
     delete cab["content-encoding"]; delete cab["content-length"];
+    if (req.url.startsWith("/web/p")) console.log(req.method, decodeURIComponent(req.url.slice(9)).slice(0, 140), "->", r.status, cab["x-status"] || "");
     res.writeHead(r.status, cab);
     res.end(Buffer.from(await r.arrayBuffer()));
   } catch (e) { res.writeHead(500); res.end(String(e)); }

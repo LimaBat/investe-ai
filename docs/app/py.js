@@ -49,6 +49,7 @@ onmessage = async ev => {
     catch (e) { const t = String(e && e.message || e); console.log(t); postMessage({ tipo: "falha", msg: t.length > 900 ? t.slice(0, 200) + " … " + t.slice(-700) : t }); }
     return;
   }
+  if (m.tipo === "diag") { let t; try { t = String(self.web.diagnostico()); } catch (e) { t = String(e); } postMessage({ tipo: "diag", texto: t }); return; }
   if (m.tipo === "pedido") {
     let res;
     try {

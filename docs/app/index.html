@@ -126,7 +126,9 @@ window.__pyFetch=function(u,o){o=o||{};let s=typeof u==="string"?u:(u&&u.url)||"
   const id=++seq,metodo=(o.method||"GET").toUpperCase();
   return new Promise((ok,nao)=>{espera.set(id,{ok,nao});
     w.postMessage({tipo:"pedido",id,metodo,caminho:s,corpo:typeof o.body==="string"?o.body:(o.body?String(o.body):"")});});};
+let diagOk=null;window.__pyDiag=()=>new Promise(ok=>{diagOk=ok;w.postMessage({tipo:"diag"});});
 w.onmessage=ev=>{const m=ev.data||{};
+  if(m.tipo==="diag"){if(diagOk)diagOk(m.texto);return;}
   if(m.tipo==="progresso"){alvo=m.pct;msg.textContent=m.msg;return;}
   if(m.tipo==="falha"){falha("O Investe.AI não conseguiu iniciar no navegador: "+m.msg.replace(/</g,"&lt;")+"<br>Recarregue a página. Se continuar, baixe o app em <a href='../'>limabat.github.io/investe-ai</a>.");return;}
   if(m.tipo==="resposta"){const p=espera.get(m.id);if(!p)return;espera.delete(m.id);

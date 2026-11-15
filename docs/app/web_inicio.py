@@ -233,3 +233,25 @@ def atender(metodo, caminho, corpo):
     except Exception: status = 500
     tipo = next((l.split(": ", 1)[1] for l in linhas[1:] if l.lower().startswith("content-type: ")), "application/octet-stream")
     return status, tipo, resto
+
+
+def diagnostico():
+    """Usado no teste automático: tenta baixar uma cotação e devolve o que aconteceu."""
+    import traceback
+    out = []
+    try:
+        r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=5d&interval=1d", timeout=20)
+        out.append("chart direto: %s %s" % (r.status_code, r.text[:160]))
+    except Exception:
+        out.append("chart direto: " + traceback.format_exc()[-600:])
+    try:
+        import yfinance
+        h = yfinance.Ticker("AAPL").history(period="5d")
+        out.append("yfinance: %d linhas" % len(h))
+    except Exception:
+        out.append("yfinance: " + traceback.format_exc()[-1500:])
+    try:
+        out.append("log: " + open(APP.LOG, encoding="utf-8").read()[-1500:])
+    except Exception as e:
+        out.append("sem log: " + repr(e))
+    return "\n".join(out)

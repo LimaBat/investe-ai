@@ -21,7 +21,8 @@ try {
   const itens = (cot.itens || cot.cotacoes || Object.values(cot)).filter?.(x => x && (x.preco || x.price) > 0) || [];
   const macro = await p.evaluate(async () => (await window.__pyFetch("/api/macro")).json());
   console.log("macro:", JSON.stringify(macro).slice(0, 300));
-  await p.frameLocator("#app").locator("nav button[data-v=invest]").click();
+  console.log("diagnóstico:\n" + await p.evaluate(() => window.__pyDiag()));
+  await p.evaluate(() => document.getElementById("app").contentDocument.querySelector("nav button[data-v=invest]").click());
   await p.waitForTimeout(4000);
   await p.screenshot({ path: "web-teste.png" });
   ok = itens.length >= 2;
