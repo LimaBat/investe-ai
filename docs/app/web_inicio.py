@@ -194,6 +194,11 @@ def iniciar(proxy, pasta, codigo):
     os.environ.update({"INVESTEAI_DADOS": pasta, "INVESTEAI_WEB": "1", "YF_DISABLE_CURL_CFFI": "1"})
     sys.argv = ["investe_ai.py", "--no-window"]
     _preparar_yfinance(pasta)
+    try:  # o feedparser novo procura o sgmllib com outro nome
+        import sgmllib
+        sys.modules.setdefault("feedparser_sgmllib", sgmllib)
+    except Exception as e:
+        print("sgmllib:", repr(e))
     mod = types.ModuleType("investe_ai")
     mod.__file__ = "/app/investe_ai.py"
     sys.modules["investe_ai"] = mod
