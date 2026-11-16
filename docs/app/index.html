@@ -56,6 +56,8 @@ h1{font-size:46px;letter-spacing:-1px;font-weight:800;background:linear-gradient
 .aviso{position:fixed;bottom:22px;left:0;right:0;text-align:center;font-size:12px;color:#5d6a89;z-index:2}
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important}.nucleo .l1,.nucleo .l2{stroke-dashoffset:0}}
 html,body{-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+/* celular: o mesmo visual do app de Android */
+@media (max-width:700px){
 .orb.a{width:280px;height:280px;top:-90px;right:-60px}
 .orb.b{width:260px;height:260px;bottom:-100px;left:-60px}
 .grid{background-size:40px 40px}
@@ -82,9 +84,8 @@ h1{font-size:clamp(34px,10.5vw,44px)}
 .logo .anel{filter:none;will-change:transform}
 .logo .pulso,.logo .nucleo{will-change:transform,opacity}
 h1{animation:none;background-size:100% auto;background-image:linear-gradient(90deg,#5eead4,#8b5cf6 60%,#c084fc)}
-.trilho i{width:100%!important;transform:scaleX(0);transform-origin:left center;box-shadow:none;will-change:transform}
-.trilho i::after{display:none}
-#tela{position:fixed;inset:0;z-index:5;transition:opacity .5s}
+}
+#tela{position:fixed;inset:0;z-index:5;display:grid;place-items:center;overflow:hidden;background:#0b1020;transition:opacity .5s}
 #tela.sai{opacity:0;pointer-events:none}
 #app{position:fixed;inset:0;width:100%;height:100%;border:0;background:#0a0f1e;display:block}
 .erro a{color:#5eead4}
@@ -116,6 +117,13 @@ let alvo=2,mostrado=0,parou=false;
 (function quadro(){if(parou)return;if(mostrado<alvo)mostrado=Math.min(alvo,mostrado+Math.max(.08,(alvo-mostrado)*.05));
   bar.style.width=mostrado+"%";pct.textContent=Math.floor(mostrado)+"%";requestAnimationFrame(quadro);})();
 function falha(t){parou=true;erro.style.display="block";erro.innerHTML=t;msg.textContent="Não foi possível abrir";}
+// volta do login com o Google: a autorização chega no # (não vai para nenhum servidor) e é tirada da barra de endereço
+let googleVolta=null;
+(function(){const h=location.hash||"";if(!/^#(g|gerro)=/.test(h))return;
+  const p=new URLSearchParams(h.slice(1));
+  try{googleVolta=p.get("g")?JSON.parse(decodeURIComponent(escape(atob(p.get("g").replace(/-/g,"+").replace(/_/g,"/"))))):{erro:p.get("gerro")||"Login cancelado."};}catch(e){googleVolta={erro:"Resposta do Google inválida."};}
+  history.replaceState(null,"",location.pathname+location.search);})();
+window.__googleWeb=function(){location.href=PROXY+"/oauth/web/inicio?volta="+encodeURIComponent(location.origin+location.pathname+location.search);};
 if(!PROXY){falha("Esta página ainda não foi configurada. Baixe o app em <a href='../'>limabat.github.io/investe-ai</a>.");return;}
 if(!window.Worker||!window.WebAssembly){falha("Este navegador é antigo demais. Use uma versão recente do Chrome, Edge, Firefox ou Safari.");return;}
 const w=new Worker("py.js?v="+encodeURIComponent(VERSAO));
@@ -137,6 +145,11 @@ w.onmessage=ev=>{const m=ev.data||{};
 w.onerror=e=>falha("Erro ao iniciar: "+String(e.message||e));
 w.postMessage({tipo:"iniciar",proxy:PROXY,versao:VERSAO});
 async function abrir(){
+  let avisoGoogle="";
+  if(googleVolta){msg.textContent="Entrando com o Google";
+    try{const g=await(await window.__pyFetch("/api/google/web",{method:"POST",body:JSON.stringify(googleVolta)})).json();
+      avisoGoogle=g.erro?"Não deu para entrar com o Google: "+g.erro:"";}catch(e){avisoGoogle="Não deu para entrar com o Google. Tente de novo.";}
+    googleVolta=null;}
   const r=await window.__pyFetch("/");let html=await r.text();
   const ponte="<script>window.__WEB__=true;(function(){var f=window.fetch.bind(window),p=window.parent;"+
     "window.fetch=function(u,o){var s=typeof u==='string'?u:(u&&u.url)||'';if(s.charAt(0)==='/'||s.indexOf('/api/')>=0&&s.indexOf(location.host)>=0)return p.__pyFetch(s,o);return f(u,o);};"+
@@ -146,7 +159,8 @@ async function abrir(){
   html=html.replace(/<head>/i,"<head>"+ponte);
   const fr=document.getElementById("app");
   fr.addEventListener("load",()=>{alvo=100;setTimeout(()=>{parou=true;document.getElementById("tela").classList.add("sai");setTimeout(()=>document.getElementById("tela").remove(),700);},500);
-    try{document.title=fr.contentDocument.title||"Investe.AI";}catch(e){}},{once:true});
+    try{document.title=fr.contentDocument.title||"Investe.AI";}catch(e){}
+    if(avisoGoogle)setTimeout(()=>{try{fr.contentWindow.toast(avisoGoogle);}catch(e){}},900);},{once:true});
   fr.srcdoc=html;}
 })();
 </script>

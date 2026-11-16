@@ -68,12 +68,19 @@ async function jget(url, op = {}) { const r = await fetch(url, op); if (!r.ok) t
 
 // ---------- Google: autorização e Google Drive (pasta oculta do app) ----------
 async function gToken(env, rt) {
-  const r = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, refresh_token: rt, grant_type: "refresh_token" }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.access_token) {
+  // a autorização pode ter vindo do app (cliente "computador") ou da versão para navegador (cliente "Web")
+  const clientes = [[env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET], [env.GOOGLE_WEB_CLIENT_ID, env.GOOGLE_WEB_CLIENT_SECRET]].filter(c => c[0] && c[1]);
+  let r, j = {};
+  for (const [id, sec] of clientes) {
+    r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: id, client_secret: sec, refresh_token: rt, grant_type: "refresh_token" }),
+    });
+    j = await r.json().catch(() => ({}));
+    if (r.ok && j.access_token) return j.access_token;
+    if (j.error === "invalid_grant" && clientes.length > 1 && id === clientes[0][0]) continue;
+  }
+  if (!r || !r.ok || !j.access_token) {
     const e = new Error(j.error === "invalid_grant" ? "A autorização do Google expirou ou foi removida. Entre com o Google no app e ative a nuvem de novo." : "O Google não respondeu (" + r.status + ").");
     e.expirou = j.error === "invalid_grant";
     throw e;

@@ -1716,7 +1716,7 @@ def _hash_senha(senha, salt=None):
 def conta_estado():
     u = usuario_atual()
     g = _gcfg()
-    out = {"logado": bool(u), "google_configurado": bool(g.get("client_id") and g.get("client_secret")),
+    out = {"logado": bool(u), "google_configurado": bool(WEB or (g.get("client_id") and g.get("client_secret"))),
            "ia_configurada": bool(_ia_efetiva()[1])}
     if u:
         gu = u.get("google") or {}
@@ -1934,9 +1934,7 @@ def _g_token(u):
     g = u.get("google") or {}
     if g.get("access") and g.get("exp", 0) > time.time() + 60: return g["access"]
     if not g.get("refresh"): return None
-    c = _gcfg()
-    r = requests.post(G_TOKEN, data={"client_id": c.get("client_id"), "client_secret": c.get("client_secret"),
-                                     "refresh_token": g["refresh"], "grant_type": "refresh_token"}, timeout=20).json()
+    r = _g_renovar(g)
     if "access_token" not in r: return None
     with _trava:
         U = usuarios(); gg = U["usuarios"][u["id"]]["google"]
@@ -3779,9 +3777,54 @@ def api_notificar_permissao():
 
 
 # ---- reajuste na nuvem: liga, desliga e consulta (o intermediário confere a carteira mesmo com o app fechado)
+def _g_renovar(g):
+    """Renova o acesso ao Google. Login feito na versão para navegador: renova pelo intermediário (o segredo do cliente Web fica lá)."""
+    if g.get("web"):
+        if not IA_PROXY_URL: return {}
+        return requests.post(IA_PROXY_URL.rstrip("/") + "/oauth/web/renovar", json={"rt": g["refresh"]},
+                             headers={"x-app-token": IA_PROXY_TOKEN or ""}, timeout=20).json()
+    c = _gcfg()
+    return requests.post(G_TOKEN, data={"client_id": c.get("client_id"), "client_secret": c.get("client_secret"),
+                                        "refresh_token": g["refresh"], "grant_type": "refresh_token"}, timeout=20).json()
+
+
+def api_google_web(d):
+    """Versão para navegador: conclui o login com o Google feito pelo intermediário (a página recebe a autorização no #)."""
+    j = d or {}
+    if j.get("erro"): return {"erro": str(j["erro"])[:300]}
+    if not j.get("access_token"): return {"erro": "O Google não devolveu a autorização. Tente de novo."}
+    try:
+        ui = requests.get("https://openidconnect.googleapis.com/v1/userinfo", headers={"Authorization": "Bearer " + j["access_token"]}, timeout=20).json()
+    except Exception as e:
+        log("google web: " + repr(e))
+        return {"erro": "Não consegui falar com o Google. Verifique a internet e tente de novo."}
+    sub = ui.get("sub"); email = (ui.get("email") or "").lower()
+    if not sub: return {"erro": "Não foi possível identificar sua conta Google."}
+    with _trava:
+        U = usuarios(); atual = usuario_atual()
+        dono = next((x for x in U["usuarios"].values() if (x.get("google") or {}).get("sub") == sub), None)
+        if atual and atual["id"] in U["usuarios"]:
+            if dono and dono["id"] != atual["id"]:
+                return {"erro": "Esta conta Google já está vinculada a outra conta do Investe.AI."}
+            alvo = U["usuarios"][atual["id"]]
+        else:
+            alvo = dono
+            if not alvo and email and ui.get("email_verified"):
+                alvo = next((x for x in U["usuarios"].values() if x.get("email") == email), None)
+            if not alvo:
+                uid = secrets.token_hex(8)
+                alvo = U["usuarios"][uid] = {"id": uid, "nome": ui.get("name") or email or "Usuário", "email": email, "criado": time.time()}
+        gu = alvo.setdefault("google", {})
+        gu.update({"sub": sub, "email": email, "foto": ui.get("picture"), "access": j["access_token"], "web": True,
+                   "exp": time.time() + int(j.get("expires_in") or 3600), "drive": "drive.appdata" in (j.get("scope") or "")})
+        if j.get("refresh_token"): gu["refresh"] = j["refresh_token"]
+        gu["puxado"] = False  # aparelho que acabou de entrar: primeiro traz os dados da nuvem
+        usuarios_salvar(U)
+        c = cfg(); c["sessao"] = alvo["id"]; cfg_salvar(c)
+    return conta_estado()
+
+
 def api_nuvem(rota):
-    if WEB:
-        return {"erro": "O reajuste na nuvem usa a sua conta Google: ative pelo app de computador ou de celular. Depois ele funciona mesmo com tudo fechado."}
     u = usuario_atual()
     gu = (u or {}).get("google") or {}
     if not gu.get("refresh"):
@@ -3906,6 +3949,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/nuvem/desativar": lambda: api_nuvem("desativar"),
                 "/api/nuvem/conferir": lambda: api_nuvem("conferir"),
                 "/api/abrir-link": lambda: api_abrir_link(d),
+                "/api/google/web": lambda: api_google_web(d),
                 "/api/eventos": lambda: api_eventos(d),
                 "/api/rf/valor": lambda: api_rf_valor(d),
                 "/api/carteira/rent": lambda: api_carteira_rent(d),
@@ -4691,7 +4735,7 @@ canvas.gp{cursor:crosshair}
 .rj-agora-modo{margin:10px 0 0}
 @media(max-width:760px){.rj-modos{grid-template-columns:1fr}}
 .nv-tg{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}.rj-c .pill.nv{margin-left:6px}
-html.web #usr-g{display:none!important}
+
 
 </style>
 </head>
@@ -6652,8 +6696,8 @@ async function usrRender(){
       <form id="usr-form" class="grid" style="gap:12px;max-width:420px"><label class="fl" id="usr-ln" style="display:none"><span>Nome</span><input id="usr-nome" autocomplete="name" maxlength="60"></label>
         <label class="fl"><span>E-mail</span><input id="usr-email" type="email" autocomplete="email" required></label><label class="fl"><span>Senha (mínimo 6 caracteres)</span><input id="usr-senha" type="password" autocomplete="current-password" required></label>
         <div id="usr-err"></div><button class="btn" type="submit" style="padding:13px" id="usr-ok">Entrar</button></form>
-      ${window.__WEB__?'':'<div class="sub" style="margin:14px 0 8px">ou</div>'}<button class="btn ghost" id="usr-g" style="padding:12px 20px"><svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:-3px;margin-right:8px"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Continuar com Google</button>
-      <p class="sub mt" style="font-size:12.5px">${window.__WEB__?'Na versão para navegador, entre com e-mail e senha: os dados ficam salvos neste navegador. Para entrar com o Google e sincronizar com outros aparelhos, use o app de computador ou de celular.':USR.google_configurado?'Abre o login do Google no seu navegador.':'Para usar o Google, configure o acesso na seção “Google” abaixo (uma vez só).'}</p></div>`;
+      <div class="sub" style="margin:14px 0 8px">ou</div><button class="btn ghost" id="usr-g" style="padding:12px 20px"><svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:-3px;margin-right:8px"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Continuar com Google</button>
+      <p class="sub mt" style="font-size:12.5px">${window.__WEB__?'Entrando com o Google, a carteira fica sincronizada com o app do computador e do celular. Com e-mail e senha, os dados ficam só neste navegador.':USR.google_configurado?'Abre o login do Google no seu navegador.':'Para usar o Google, configure o acesso na seção “Google” abaixo (uma vez só).'}</p></div>`;
   /* ativos por categoria */
   const todos=[...new Set([...FAVS,...ATIVOS,...PL.itens.map(i=>i.t).filter(t=>!PL_RF.has(t))])].slice(0,20);
   const cot={};try{if(todos.length){(await api('/api/cotacoes?tickers='+encodeURIComponent(todos.join(',')))).itens.forEach(r=>cot[r.ticker]=r);}}catch(e){}
@@ -6685,7 +6729,7 @@ function usrBind(){
   const f=$('#usr-form');if(f)f.onsubmit=async e=>{e.preventDefault();$('#usr-err').innerHTML='';const bt=$('#usr-ok');bt.disabled=true;
     try{USR=await apiPost(modo==='reg'?'/api/conta/registrar':'/api/conta/entrar',{nome:$('#usr-nome').value,email:$('#usr-email').value,senha:$('#usr-senha').value});sfx.play('ok');await usrPosLogin();toast('Bem-vindo, '+USR.usuario.nome);}
     catch(er){$('#usr-err').innerHTML=errBox(er.message);bt.disabled=false;}};
-  const g=$('#usr-g');if(g)g.onclick=async()=>{g.disabled=true;
+  const g=$('#usr-g');if(g)g.onclick=async()=>{if(window.__WEB__&&parent.__googleWeb){parent.__googleWeb();return;}g.disabled=true;
     try{const _gr=await apiPost('/api/google/iniciar');if(EH_ANDROID&&_gr&&_gr.url)location.href=_gr.url;toast('Continue o login na janela do navegador.');
       const t0=Date.now(),jaTinha=!!(USR.logado&&USR.usuario&&USR.usuario.google);
       const iv=setInterval(async()=>{await usrCarrega();const tem=!!(USR.logado&&USR.usuario&&USR.usuario.google);

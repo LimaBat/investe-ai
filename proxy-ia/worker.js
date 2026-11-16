@@ -2,19 +2,20 @@
 // O programa manda a pergunta para cá; só este servidor conhece as chaves do Groq e do Gemini.
 // Segredos (wrangler secret put ...): GROQ_KEY, GEMINI_KEY (opcional, reserva e pesquisa no Google), APP_TOKEN (opcional).
 // Reajuste na nuvem (nuvem.js): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BRAPI_TOKEN (opcional), TELEGRAM_TOKEN e TELEGRAM_BOT (opcionais).
+import { googleWeb } from "./google_web.js";
 import { nuvemRotas, nuvemAgendado } from "./nuvem.js";
-const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type,x-app-token,x-app-versao,x-cookie,accept,accept-language", "Access-Control-Allow-Methods": "POST,GET,PATCH,OPTIONS", "Access-Control-Max-Age": "86400" };
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type,x-app-token,x-app-versao,x-cookie,accept,accept-language,authorization", "Access-Control-Allow-Methods": "POST,GET,PATCH,OPTIONS", "Access-Control-Max-Age": "86400" };
 
 // ---- versão para navegador: repassa os pedidos de dados (o Yahoo, o Banco Central e as notícias não aceitam pedidos de páginas web).
 // Só para estes sites; os cookies vão e voltam em cabeçalhos próprios (o navegador não deixa a página mexer nos cookies de outro site).
-const WEB_HOSTS = /(^|\.)yahoo\.com$|^api\.bcb\.gov\.br$|^olinda\.bcb\.gov\.br$|^news\.google\.com$|^economia\.awesomeapi\.com\.br$|^brapi\.dev$|^api\.coingecko\.com$/;
+const WEB_HOSTS = /(^|\.)yahoo\.com$|^api\.bcb\.gov\.br$|^olinda\.bcb\.gov\.br$|^news\.google\.com$|^economia\.awesomeapi\.com\.br$|^brapi\.dev$|^api\.coingecko\.com$|^(www|openidconnect)\.googleapis\.com$/;
 const UA_WEB = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 async function webProxy(req, url) {
   let alvo;
   try { alvo = new URL(url.searchParams.get("u") || ""); } catch { return new Response("endereço inválido", { status: 400, headers: CORS }); }
   if (!/^https?:$/.test(alvo.protocol) || !WEB_HOSTS.test(alvo.hostname)) return new Response("site não permitido", { status: 403, headers: CORS });
   const h = new Headers({ "user-agent": UA_WEB });
-  for (const k of ["accept", "accept-language", "content-type"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+  for (const k of ["accept", "accept-language", "content-type", "authorization"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
   const ck = req.headers.get("x-cookie"); if (ck) h.set("cookie", ck);
   let r;
   try {
@@ -72,9 +73,10 @@ export default {
   async fetch(req, env) {
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
     const url = new URL(req.url);
-    if (url.pathname === "/saude") return json({ ok: true, groq: !!env.GROQ_KEY, gemini: !!env.GEMINI_KEY, nuvem: !!(env.NUVEM && env.GOOGLE_CLIENT_SECRET), telegram: !!env.TELEGRAM_TOKEN });
+    if (url.pathname === "/saude") return json({ ok: true, groq: !!env.GROQ_KEY, gemini: !!env.GEMINI_KEY, nuvem: !!(env.NUVEM && env.GOOGLE_CLIENT_SECRET), google_web: !!(env.GOOGLE_WEB_CLIENT_ID && env.GOOGLE_WEB_CLIENT_SECRET), telegram: !!env.TELEGRAM_TOKEN });
     if (url.pathname.startsWith("/nuvem/") || url.pathname.startsWith("/tg/")) return nuvemRotas(req, env, url, { json, groq });
     if (url.pathname === "/web/p") return webProxy(req, url);
+    if (url.pathname.startsWith("/oauth/web/")) return googleWeb(req, env, url, { json, CORS });
     if (url.pathname !== "/chat" || req.method !== "POST") return json({ erro: "Não encontrado." }, 404);
     if (env.APP_TOKEN && req.headers.get("x-app-token") !== env.APP_TOKEN) return json({ erro: "Acesso negado." }, 403);
     if (env.LIMITE) {  // limite por pessoa (endereço de internet), definido no wrangler.toml

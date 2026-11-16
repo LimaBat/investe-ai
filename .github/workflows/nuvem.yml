@@ -72,8 +72,10 @@ jobs:
           BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_BOT: ${{ secrets.TELEGRAM_BOT }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          GOOGLE_WEB_CLIENT_SECRET: ${{ secrets.GOOGLE_WEB_CLIENT_SECRET }}
         run: |
-          for N in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BRAPI_TOKEN TELEGRAM_TOKEN TELEGRAM_BOT; do
+          for N in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BRAPI_TOKEN TELEGRAM_TOKEN TELEGRAM_BOT GOOGLE_WEB_CLIENT_ID GOOGLE_WEB_CLIENT_SECRET; do
             V="${!N}"
             if [ -n "$V" ]; then printf '%s' "${V#@}" | npx --yes wrangler@4 secret put "$N" >/dev/null && echo "$N guardado"; else echo "::warning::Segredo $N vazio no GitHub."; fi
           done
